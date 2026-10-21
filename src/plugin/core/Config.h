@@ -610,6 +610,14 @@ struct Config {
     // Rolling save backups kept per save name ("saveBackups" in coop_config.json
     // or KENSHICOOP_SAVE_BACKUPS; default 3, 0 = off). See sync/SaveXfer.h.
     int                saveBackups;
+
+    // Host settings for what a join may do (protocol 56, issue #42) - the
+    // host's starting values; the F2 panel switches them live. coop_config.json
+    // "joinCanBuild" / "joinCanUseContainers" / "joinCanBuy" (default true) or
+    // KENSHICOOP_JOIN_BUILD / _CONTAINERS / _BUY ("0" = refuse).
+    bool               joinCanBuild;
+    bool               joinCanUseContainers;
+    bool               joinCanBuy;
 };
 
 // "F1".."F12" (any case) -> virtual-key code (VK_F1 = 0x70); anything else -> F2.

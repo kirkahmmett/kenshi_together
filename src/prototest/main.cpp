@@ -119,6 +119,7 @@ static void testSizes() {
     CHECK_EQ("sizeof(ResearchPacket)",          sizeof(ResearchPacket),          57); // v37: research
     CHECK_EQ("sizeof(DeedPacket)",              sizeof(DeedPacket),              78); // v54: deeds
     CHECK_EQ("sizeof(FixturePacket)",           sizeof(FixturePacket),           90); // v55: fixture identity
+    CHECK_EQ("sizeof(PermsPacket)",             sizeof(PermsPacket),             8);  // v56: join permissions
     CHECK_EQ("sizeof(CamHintPacket)",           sizeof(CamHintPacket),           17); // v43: camera hint
     CHECK_EQ("sizeof(CellClaimPacket)",         sizeof(CellClaimPacket),         21); // v49: cell claim
     CHECK_EQ("sizeof(InvXferAckPacket)",        sizeof(InvXferAckPacket),        18); // v50: transfer verdict
@@ -311,8 +312,8 @@ static void testSizes() {
     CHECK_EQ("EVT_SQUAD_MOVE id", (int)EVT_SQUAD_MOVE, 11);
     CHECK("EVT_SQUAD_MOVE distinct", EVT_SQUAD_MOVE != EVT_RECRUIT &&
           EVT_SQUAD_MOVE != EVT_NONE && EVT_SQUAD_MOVE != EVT_EXIT_FURNITURE);
-    CHECK_EQ("PROTOCOL_VERSION (v55: runtime-fixture identity)",
-             (int)PROTOCOL_VERSION, 55);
+    CHECK_EQ("PROTOCOL_VERSION (v56: host settings for the join)",
+             (int)PROTOCOL_VERSION, 56);
 
     // Protocol 52: the shared money pool. The two players spend from ONE wallet,
     // so the join reports CHANGES and the host the authoritative TOTAL - swap
@@ -496,6 +497,7 @@ static void testRoundTrips() {
     roundTrip<ResearchPacket>("ResearchPacket", (u8)PKT_RESEARCH);
     roundTrip<DeedPacket>("DeedPacket", (u8)PKT_DEED);
     roundTrip<FixturePacket>("FixturePacket", (u8)PKT_FIXTURE);
+    roundTrip<PermsPacket>("PermsPacket", (u8)PKT_PERMS);
     roundTrip<CellClaimPacket>("CellClaimPacket", (u8)PKT_CELL_CLAIM);
     roundTrip<InvXferAckPacket>("InvXferAckPacket", (u8)PKT_INV_XFER_ACK);
 
@@ -1603,6 +1605,8 @@ static void testFlushWorldStateContract() {
     in.pushLoadGo(0, lg);
     in.pushLoadReq(1, lrq);
     in.pushLoadNack(1, lnk);
+    PermsPacket prm; std::memset(&prm, 0, sizeof(prm)); prm.type = (u8)PKT_PERMS;
+    in.pushPerms(prm);
 
     in.flushWorldState();
 
@@ -1662,6 +1666,7 @@ static void testFlushWorldStateContract() {
     SP_KEPT("loadGo",    InboundLoadGo,    drainLoadGos);
     SP_KEPT("loadReq",   InboundLoadReq,   drainLoadReqs);
     SP_KEPT("loadNack",  InboundLoadNack,  drainLoadNacks);
+    SP_KEPT("perms",     InboundPerms,     drainPerms);
     #undef SP_KEPT
 }
 

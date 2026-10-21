@@ -266,6 +266,15 @@ void loadConfig(Config& c) {
     c.panelKeyVk = parsePanelKey(envOr("KENSHICOOP_PANEL_KEY", fileOr(f, "panelKey", "F2").c_str()));
     c.saveBackups = std::atoi(envOr("KENSHICOOP_SAVE_BACKUPS", fileOr(f, "saveBackups", "3").c_str()).c_str());
     if (c.saveBackups < 0) c.saveBackups = 0;
+    {
+        std::string v;
+        v = envOr("KENSHICOOP_JOIN_BUILD", fileOr(f, "joinCanBuild", "1").c_str());
+        c.joinCanBuild = !(v == "0" || v == "false");
+        v = envOr("KENSHICOOP_JOIN_CONTAINERS", fileOr(f, "joinCanUseContainers", "1").c_str());
+        c.joinCanUseContainers = !(v == "0" || v == "false");
+        v = envOr("KENSHICOOP_JOIN_BUY", fileOr(f, "joinCanBuy", "1").c_str());
+        c.joinCanBuy = !(v == "0" || v == "false");
+    }
 
     // Protocol 36 movement-smoothness knobs. Defaults are the historical
     // constants; any positive env value overrides for live A/B tuning.

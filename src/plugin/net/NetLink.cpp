@@ -250,6 +250,7 @@ void NetLink::queueResearch(const ResearchPacket& pkt) { pushLocked(outCs_, outR
 void NetLink::queueDeed(const DeedPacket& pkt) { pushLocked(outCs_, outDeed_, pkt); }
 
 void NetLink::queueFixture(const FixturePacket& pkt) { pushLocked(outCs_, outFixture_, pkt); }
+void NetLink::queuePerms(const PermsPacket& pkt) { pushLocked(outCs_, outPerms_, pkt); }
 
 void NetLink::queueBuildPlace(const BuildPlacePacket& pkt) { pushLocked(outCs_, outBuildPlace_, pkt); }
 
@@ -873,6 +874,14 @@ void NetLink::threadLoop() {
                         if (readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &fxp)
                             && inbound_) {
                             inbound_->pushFixture(fxp.ownerId, fxp);
+                        }
+                    } else if (type == PKT_PERMS) {
+                        // Reliable join-permission set (protocol 56), host -> join.
+                        PermsPacket pp;
+                        if (!isHost_ &&
+                            readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &pp)
+                            && inbound_) {
+                            inbound_->pushPerms(pp);
                         }
                     } else if (type == PKT_BUILD_PLACE) {
                         // Reliable placed-building announcement (protocol 27):
@@ -1511,6 +1520,20 @@ void NetLink::threadLoop() {
                 enet_peer_send(serverPeer_, CH_RELIABLE, out);
             } else {
                 enet_packet_destroy(out);
+            }
+        }
+
+        // Join-permission sets (protocol 56): host broadcast, CH_RELIABLE.
+        {
+            std::vector<PermsPacket> permPkts;
+            EnterCriticalSection(&outCs_);
+            permPkts.swap(outPerms_);
+            LeaveCriticalSection(&outCs_);
+            for (size_t i = 0; i < permPkts.size(); ++i) {
+                ENetPacket* out = enet_packet_create(&permPkts[i], sizeof(PermsPacket),
+                                                     ENET_PACKET_FLAG_RELIABLE);
+                if (isHost_) enet_host_broadcast(enetHost_, CH_RELIABLE, out);
+                else         enet_packet_destroy(out); // host -> join only
             }
         }
 

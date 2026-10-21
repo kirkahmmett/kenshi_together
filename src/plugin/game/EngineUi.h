@@ -63,6 +63,11 @@ struct CoopPanelState {
     // Last connection error worth showing the player (null/"" = none), e.g. a
     // protocol mismatch. Shown on the panel's status line while offline.
     const char*        lastError;
+    // Host settings for the join (protocol 56): current values, shown as three
+    // switches while the panel is armed as HOST; a press calls onPermToggle
+    // (0 build, 1 storage containers, 2 buying). Null callback = rows hidden.
+    bool               permBuild, permContainers, permBuy;
+    void               (*onPermToggle)(int which);
 };
 // The panel's role/transport selections at the moment Connect is hit. peerId is the
 // Steam ID pasted in-panel this session (0 if none), and overrides the config

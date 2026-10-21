@@ -278,6 +278,11 @@ DataPanelLine_Button*   g_friendBtns[INVITE_ROWS_MAX];
 unsigned long long      g_friendBtnIds[INVITE_ROWS_MAX];
 std::string             g_lastInviteSig;    // rebuild gate for the invite rows
 
+// Host settings for the join (protocol 56): three switches, HOST role only.
+DataPanelLine_Button*   g_permBtns[3]  = { 0, 0, 0 };
+void                  (*g_permToggleFn)(int) = 0;
+int                     g_lastPermSig  = -1; // rebuild gate (bit per switch)
+
 // Button callbacks (free functions - MyGUI::newDelegate wraps them without any
 // raw-MyGUI link). A press flips the armed flag and requests a rebuild so the
 // caption reflects the new choice on the next tick.
@@ -333,6 +338,16 @@ void onPasteIdBtn(DataPanelLine*) {
     }
     g_panel.needsRebuild = true;
 }
+// One callback for the three permission switches: the line says which.
+void onPermBtn(DataPanelLine* line) {
+    for (int i = 0; i < 3; ++i) {
+        if (g_permBtns[i] && (DataPanelLine*)g_permBtns[i] == line) {
+            if (g_permToggleFn) g_permToggleFn(i);
+            g_panel.needsRebuild = true;
+            return;
+        }
+    }
+}
 // Open the host's lobby + friend list.
 void onInviteBtn(DataPanelLine*) {
     if (!g_inviteApi || !g_inviteApi->begin) return;
@@ -370,6 +385,9 @@ struct PanelStrings {
     int                friendRows;                  // 0..INVITE_ROWS_MAX
     const std::string *friendKey[INVITE_ROWS_MAX];
     const std::string *friendCap[INVITE_ROWS_MAX];
+    // Host settings for the join (null = rows hidden).
+    const std::string *permKey[3];
+    const std::string *permCap[3];
 };
 
 void panelBuildSeh(DatapanelGUI* p, const PanelStrings* s) {
@@ -380,6 +398,14 @@ void panelBuildSeh(DatapanelGUI* p, const PanelStrings* s) {
         g_transBtn = p->setLineButton(*s->transKey, *s->transCap, 0);
         g_connBtn  = p->setLineButton(*s->connKey,  *s->connCap,  0);
         p->addSpace(0, 0.35f);
+        // Host settings for the join: three switches, directly under the
+        // session toggles because they are part of how the host runs it.
+        for (int i = 0; i < 3; ++i) g_permBtns[i] = 0;
+        if (s->permKey[0]) {
+            for (int i = 0; i < 3; ++i)
+                g_permBtns[i] = p->setLineButton(*s->permKey[i], *s->permCap[i], 0);
+            p->addSpace(0, 0.35f);
+        }
         // Outbound Steam invite: the button opens the list, each friend row
         // invites that friend. Above the ID rows because it replaces them.
         g_inviteBtn = 0; g_inviteLine = 0;
@@ -449,6 +475,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                    CoopDisconnectFn onDisconnect) {
     if (!st) return;
     g_inviteApi = st->invite;
+    g_permToggleFn = st->onPermToggle;
     ForgottenGUI* g = ::gui; // KenshiLib data export (spike 46)
     { static void* s_last = (void*)-1;
       if ((void*)g != s_last) { s_last = (void*)g;
@@ -488,6 +515,8 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             g_inviteBtn = 0; g_inviteLine = 0;
             for (int i = 0; i < INVITE_ROWS_MAX; ++i) g_friendBtns[i] = 0;
             g_lastInviteSig.clear();
+            for (int i = 0; i < 3; ++i) g_permBtns[i] = 0;
+            g_lastPermSig = -1;
             g_panel.open = false;
             coop::logLine("[coop-ui] panel closed");
         }
@@ -537,6 +566,12 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
         }
     }
     if (inviteSig != g_lastInviteSig) g_panel.needsRebuild = true;
+
+    // Host settings rows: shown while the panel is armed as HOST.
+    const bool offerPerms = g_permToggleFn && g_panel.hostFlag;
+    const int permSig = offerPerms ? ((st->permBuild ? 1 : 0) | (st->permContainers ? 2 : 0) |
+                                      (st->permBuy ? 4 : 0) | 8) : 0;
+    if (permSig != g_lastPermSig) g_panel.needsRebuild = true;
 
     // Create the window once (outside SEH - see the header note on C2712).
     // Layer MUST be "Info": spike 48 proved createFloatingLabel renders non-null
@@ -675,6 +710,18 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             ps.friendKey[i] = &friendKeys[i];
             ps.friendCap[i] = &friendCaps[i];
         }
+        std::string permKeys[3] = { "permbuild", "permstore", "permbuy" };
+        std::string permCaps[3];
+        {
+            const char* what[3] = { "Join may build", "Join may use storage", "Join may buy" };
+            const bool  on[3]   = { st->permBuild, st->permContainers, st->permBuy };
+            for (int i = 0; i < 3; ++i)
+                permCaps[i] = std::string(what[i]) + ": " + (on[i] ? "YES" : "NO") + "    (switch)";
+        }
+        for (int i = 0; i < 3; ++i) {
+            ps.permKey[i] = offerPerms ? &permKeys[i] : 0;
+            ps.permCap[i] = offerPerms ? &permCaps[i] : 0;
+        }
         panelBuildSeh(g_panel.panel, &ps);
 
         // Delegate assignment + white-colouring live OUTSIDE the SEH frame (pointer
@@ -686,6 +733,8 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
         if (g_copyIdBtn)  g_copyIdBtn->callback  = MyGUI::newDelegate(&onCopyIdBtn);
         if (g_pasteIdBtn) g_pasteIdBtn->callback = MyGUI::newDelegate(&onPasteIdBtn);
         if (g_inviteBtn)  g_inviteBtn->callback  = MyGUI::newDelegate(&onInviteBtn);
+        for (int i = 0; i < 3; ++i)
+            if (g_permBtns[i]) g_permBtns[i]->callback = MyGUI::newDelegate(&onPermBtn);
         for (int i = 0; i < INVITE_ROWS_MAX; ++i)
             if (g_friendBtns[i]) g_friendBtns[i]->callback = MyGUI::newDelegate(&onFriendBtn);
         dbgColourSeh(g_debugLine, !transfer.empty() || hasErr); // amber: streaming / error
@@ -698,6 +747,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
         g_panel.lastStatus = detail;
         g_panel.lastTransfer = transfer;
         g_lastInviteSig = inviteSig;
+        g_lastPermSig = permSig;
     }
 
     // Connect / disconnect on the Online/Offline toggle edge (edge, not level, so

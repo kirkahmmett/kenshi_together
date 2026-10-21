@@ -25,7 +25,7 @@ typedef double         f64;
 // this header stays a definition file. When you bump PROTOCOL_VERSION, add the
 // matching entry at the bottom of that doc. The version is checked at handshake
 // and a mismatch is rejected (no back-compat).
-const u16 PROTOCOL_VERSION = 55;
+const u16 PROTOCOL_VERSION = 56;
 
 // Packet type tags (first byte of every packet).
 enum PacketType {
@@ -76,7 +76,8 @@ enum PacketType {
     PKT_INV_XFER_ACK     = 45,// RELIABLE transfer verdict (protocol 50); InvXferAckPacket
     PKT_MONEY_DELTA      = 46,// RELIABLE join money-pool delta (join -> host, protocol 52); MoneyDeltaPacket
     PKT_DEED             = 47,// RELIABLE property-ownership row (protocol 54); DeedPacket
-    PKT_FIXTURE          = 48 // RELIABLE runtime-fixture identity row (protocol 55); FixturePacket
+    PKT_FIXTURE          = 48,// RELIABLE runtime-fixture identity row (protocol 55); FixturePacket
+    PKT_PERMS            = 49 // RELIABLE host's join-permission settings (protocol 56); PermsPacket
 };
 
 // One-shot transition events carried on the RELIABLE channel. Continuous state
@@ -1577,6 +1578,24 @@ struct TimePongPacket {
     u32 nonce;        // echoed from the ping
     u32 echoWallMs;   // the ping's senderWallMs, echoed verbatim
     u32 responderWallMs; // host's wallClockMs() at echo
+};
+
+// ---- Protocol 56: host settings for what a join may do (issue #42) -------------
+// The host's F2 panel switches three join permissions; the host sends the whole
+// set on connect, on every change and on a slow safety resend, and the JOIN
+// enforces it locally in the engine detours (it is the join's own UI action that
+// is refused, so nothing has to be undone afterwards):
+//   joinBuild      - place new buildings from the build menu
+//   joinContainers - move items between its characters and building storage
+//   joinBuy        - buy from traders
+// 1 = allowed (the default), 0 = refused. seq is monotonic; a receiver keeps the
+// newest. Host -> join only.
+struct PermsPacket {
+    u8  type;           // = PKT_PERMS
+    u32 seq;            // host-monotonic
+    u8  joinBuild;
+    u8  joinContainers;
+    u8  joinBuy;
 };
 
 #pragma pack(pop)

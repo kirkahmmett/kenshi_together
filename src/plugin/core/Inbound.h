@@ -184,6 +184,12 @@ struct InboundTime {
     TimePacket pkt;
 };
 
+// One received join-permission set (protocol 56, host -> join). Session-level:
+// the host's settings outlive a world swap.
+struct InboundPerms {
+    PermsPacket pkt;
+};
+
 // One received baked-door state row (protocol 26): a door the sender's table
 // saw move; the receiver applies it through the engine's own door actions
 // (baseline updated first - echo-free).
@@ -669,6 +675,11 @@ public:
         InboundSaveAck sa; sa.ownerId = ownerId; sa.pkt = pkt;
         EnterCriticalSection(&cs_); saveAck_.push_back(sa); LeaveCriticalSection(&cs_);
     }
+    // NET thread: the host's join-permission set (protocol 56).
+    void pushPerms(const PermsPacket& pkt) {
+        InboundPerms ip; ip.pkt = pkt;
+        EnterCriticalSection(&cs_); perms_.push_back(ip); LeaveCriticalSection(&cs_);
+    }
     // NET thread: coordinated-load packets (protocol 32), owner-tagged.
     void pushLoadGo(u32 ownerId, const LoadGoPacket& pkt) {
         InboundLoadGo lg; lg.ownerId = ownerId; lg.pkt = pkt;
@@ -814,6 +825,9 @@ public:
     void drainLoadGos(std::deque<InboundLoadGo>& out) {
         EnterCriticalSection(&cs_); out.swap(loadGo_); LeaveCriticalSection(&cs_);
     }
+    void drainPerms(std::deque<InboundPerms>& out) {
+        EnterCriticalSection(&cs_); out.swap(perms_); LeaveCriticalSection(&cs_);
+    }
     void drainLoadReqs(std::deque<InboundLoadReq>& out) {
         EnterCriticalSection(&cs_); out.swap(loadReq_); LeaveCriticalSection(&cs_);
     }
@@ -910,6 +924,9 @@ private:
     SessionQ<InboundLoadGo>        loadGo_;
     SessionQ<InboundLoadReq>       loadReq_;
     SessionQ<InboundLoadNack>      loadNack_;
+    // SESSION-PRESERVING: the host's join permissions (protocol 56) are a
+    // session setting, not world state - a world swap must not drop them.
+    SessionQ<InboundPerms>         perms_;
 
     Inbound(const Inbound&);
     Inbound& operator=(const Inbound&);

@@ -237,6 +237,65 @@ inline unsigned __int64 perfNow() {
     } else { stmt; } \
 } while (0)
 
+// ---- Host settings for the join (protocol 56, issue #42) ----------------------
+// Host: the live choice (seeded from config, switched in the F2 panel), sent on
+// connect, on change and every PERM_RESEND_MS. Join: applies the newest set it
+// received and tells the player for a few seconds when an action was refused.
+bool          g_permBuild = true, g_permContainers = true, g_permBuy = true;
+coop::u32     g_permSeq = 0;
+bool          g_permDirty = true;
+DWORD         g_permSentTick = 0;
+coop::u32     g_permSeenSeq = 0;      // join: newest host seq applied
+unsigned int  g_permRefusalSeen = 0;  // join: refusals already announced
+DWORD         g_permNoticeTick = 0;
+int           g_permNoticeKind = 0;
+const DWORD   PERM_RESEND_MS = 10000;
+const DWORD   PERM_NOTICE_MS = 5000;
+
+void onPermToggle(int which) {
+    bool* f = (which == 0) ? &g_permBuild : (which == 1) ? &g_permContainers : &g_permBuy;
+    *f = !*f;
+    g_permDirty = true;
+    char b[112];
+    _snprintf(b, sizeof(b) - 1, "[perm] host set join %s = %s",
+              which == 0 ? "build" : which == 1 ? "containers" : "buy", *f ? "ON" : "OFF");
+    b[sizeof(b) - 1] = '\0';
+    coopLog(b);
+}
+
+void tickPermissions() {
+    if (g_cfg.isHost) {
+        DWORD now = GetTickCount();
+        if (g_peerPresent && g_net.isRunning() &&
+            (g_permDirty || now - g_permSentTick >= PERM_RESEND_MS)) {
+            coop::PermsPacket p;
+            p.type = (coop::u8)coop::PKT_PERMS;
+            p.seq = ++g_permSeq;
+            p.joinBuild = g_permBuild ? 1 : 0;
+            p.joinContainers = g_permContainers ? 1 : 0;
+            p.joinBuy = g_permBuy ? 1 : 0;
+            g_net.queuePerms(p);
+            g_permDirty = false;
+            g_permSentTick = now;
+        }
+        return;
+    }
+    std::deque<coop::InboundPerms> got;
+    g_inbound.drainPerms(got);
+    for (std::deque<coop::InboundPerms>::iterator it = got.begin(); it != got.end(); ++it) {
+        if (it->pkt.seq <= g_permSeenSeq && g_permSeenSeq != 0) continue; // stale resend
+        g_permSeenSeq = it->pkt.seq;
+        coop::engine::setJoinPermissions(it->pkt.joinBuild != 0, it->pkt.joinContainers != 0,
+                                         it->pkt.joinBuy != 0);
+    }
+    unsigned int rs = coop::engine::permRefusalSeq();
+    if (rs != g_permRefusalSeen) {
+        g_permRefusalSeen = rs;
+        g_permNoticeKind = coop::engine::permRefusalKind();
+        g_permNoticeTick = GetTickCount();
+    }
+}
+
 // Pre-save hook target: copy the save folder Kenshi is about to overwrite into
 // the rolling backups (sync/SaveXfer.h). A first save has nothing to copy.
 void backupBeforeSave(const char* name, bool /*autosave*/) {
@@ -342,6 +401,7 @@ void processNetEvents(GameWorld* gw) {
         if (g_cfg.latejoinSync) g_repl.onPeerConnected(g_net, g_net.localId());
         else coopLog("[latejoin] connect edge seen, resync OFF (gate)");
         g_peerPresent = true;
+        g_permDirty = true; // host: send the join-permission set now (protocol 56)
         // Coordinated save (protocol 31): while connected under save-sync,
         // the JOIN never writes a save locally - the host's save is
         // authoritative and a local save press forwards as PKT_SAVE_REQ.
@@ -366,6 +426,12 @@ void processNetEvents(GameWorld* gw) {
         // release any carry or occupancy its driven copies still hold.
         if (gw && (g_cfg.carrySync || g_cfg.furnSync)) g_repl.sweepCarries(gw);
         g_peerPresent = false;
+        // Join alone again: the host's restrictions no longer apply, and a new
+        // host session numbers its permission sets from 1.
+        if (!g_cfg.isHost) {
+            coop::engine::setJoinPermissions(true, true, true);
+            g_permSeenSeq = 0;
+        }
         // Coordinated save: disconnected = solo again; local saves must work.
         if (!g_cfg.isHost && g_cfg.saveSync) {
             coop::engine::setSaveSuppress(false);
@@ -828,6 +894,15 @@ void coopPanelDrive() {
         detail = lastErr.empty() ? std::string(kb) : ("Offline - " + lastErr);
         ostate = 0;
     }
+    // Join: an action the host's settings refused just now says why.
+    if (!g_cfg.isHost && g_permNoticeTick != 0 &&
+        GetTickCount() - g_permNoticeTick < PERM_NOTICE_MS) {
+        detail = std::string("The host has turned off ") +
+                 (g_permNoticeKind == 1 ? "building" :
+                  g_permNoticeKind == 2 ? "storage containers" : "buying") +
+                 " for joins";
+        ostate = 1;
+    }
     ps.detail = detail.c_str();
 
     // Join save-transfer status for the panel: while a join streams the host's
@@ -867,6 +942,8 @@ void coopPanelDrive() {
     ps.invite = &s_invite;
     ps.panelVk = g_cfg.panelKeyVk;
     ps.lastError = lastErr.c_str();
+    ps.permBuild = g_permBuild; ps.permContainers = g_permContainers; ps.permBuy = g_permBuy;
+    ps.onPermToggle = &onPermToggle;
 
     // Pump Steam callbacks: an inbound "Join Game" (a friend inviting US) fires
     // coopUiConnect, and the host's lobby/friend list advance here.
@@ -1682,6 +1759,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     }
 
     KC_PERF(S_NET_EVENTS, processNetEvents(gw));
+    KC_PERF(S_NET_EVENTS, tickPermissions());
 
     // Coordinated load (protocol 32): the JOIN never loads locally while a
     // peer is connected under the gate - the host arbitrates; a manual load
@@ -2349,6 +2427,9 @@ void installEngineDetours() {
     // Rolling backups: the join keeps each save a transfer replaces (SaveXfer),
     // and every local write copies the folder it is about to overwrite first.
     coop::savexfer::setBackupKeep(g_cfg.saveBackups);
+    g_permBuild      = g_cfg.joinCanBuild;
+    g_permContainers = g_cfg.joinCanUseContainers;
+    g_permBuy        = g_cfg.joinCanBuy;
     coop::engine::setPreSaveCallback(&backupBeforeSave);
     {
         char b[96];

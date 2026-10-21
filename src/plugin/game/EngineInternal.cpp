@@ -697,9 +697,38 @@ TownIsPlayerBldgsFn  g_townIsPlayerBldgsFn  = 0;
 // buyer-side effects (wallet debit, item into the buyer's inventory) already
 // ride the money + inventory channels; only the VENDOR-side mutation stays
 // local, which this line makes measurable.
+// ---- Host settings for the join (protocol 56, issue #42) --------------------
+// Set on the JOIN from the host's PKT_PERMS (all true elsewhere). Enforced in
+// buyItem_hook, tryAddItem_hook and placeFinal_hook below. Each refusal bumps
+// g_permRefusalSeq and records its kind so the plugin can tell the player.
+static bool         g_permBuild      = true;
+static bool         g_permContainers = true;
+static bool         g_permBuy        = true;
+static bool         g_inBuy          = false; // inside buyItem: its own adds are not storage moves
+static unsigned int g_permRefusalSeq  = 0;
+static int          g_permRefusalKind = 0;
+static void notePermRefusal(int kind, const char* what) {
+    ++g_permRefusalSeq;
+    g_permRefusalKind = kind;
+    char b[128];
+    _snprintf(b, sizeof(b) - 1, "[perm] REFUSED %s (the host has disabled it for joins)", what);
+    b[sizeof(b) - 1] = '\0';
+    coop::logLine(b);
+}
+// A building's inventory (storage) as opposed to a character's: hand type
+// BUILDING (itemType 0) with a non-empty hand.
+static bool handIsBuilding(const unsigned int h[5]) {
+    return h[0] == (unsigned int)BUILDING && (h[1] || h[2] || h[3] || h[4]);
+}
+
 BuyItemFn g_buyItemOrig = 0;
 Item* __fastcall buyItem_hook(Inventory* self, Item* itemToBuy, RootObject* sendingTo) {
+    // Host setting (protocol 56): a join the host forbade from buying gets no
+    // item and pays nothing - the original is never called.
+    if (!g_permBuy) { notePermRefusal(3, "buying from traders"); return 0; }
+    g_inBuy = true;
     Item* got = g_buyItemOrig(self, itemToBuy, sendingTo);
+    g_inBuy = false;
     __try {
         char sid[48]; sid[0] = '\0';
         if (itemToBuy) {
@@ -784,7 +813,7 @@ static bool sourceHandOfItem(Item* item, unsigned int out[5]) {
 Item* __fastcall removeDontDestroy_hook(Inventory* self, Item* it, int howmany,
                                         bool returnCopyIfSomeLeft) {
     Item* r = g_removeDontDestroyOrig(self, it, howmany, returnCopyIfSomeLeft);
-    if ((g_blockXfer || xferDumpFlag()) && !g_invVetoSuspend) {
+    if ((g_blockXfer || xferDumpFlag() || !g_permContainers) && !g_invVetoSuspend) {
         __try {
             g_pendRemItem = r ? r : it; g_pendRemInv = self;
             // Resolve + cache the SOURCE owner-character hand NOW, at remove time.
@@ -800,9 +829,9 @@ Item* __fastcall removeDontDestroy_hook(Inventory* self, Item* it, int howmany,
 }
 
 bool __fastcall tryAddItem_hook(Inventory* self, Item* item, int quantity) {
-    if ((g_blockXfer || xferDumpFlag()) && !g_invVetoSuspend && g_invOwnerClass &&
-        self && item) {
-        int decision = 0; // 1 = block
+    if ((g_blockXfer || xferDumpFlag() || !g_permContainers) && !g_invVetoSuspend &&
+        g_invOwnerClass && self && item) {
+        int decision = 0; // 1 = cross-owner veto, 2 = host refused storage for joins
         int srcClass = 0, dstClass = 0;
         bool haveSrc = false, haveDst = false;
         unsigned int dstHand[5] = { 0, 0, 0, 0, 0 };
@@ -824,6 +853,11 @@ bool __fastcall tryAddItem_hook(Inventory* self, Item* item, int quantity) {
                 srcClass = g_invOwnerClass(srcHand);
                 if ((srcClass == 1 && dstClass == 2) || (srcClass == 2 && dstClass == 1))
                     decision = 1;
+                // Host setting: our own characters <-> building storage, either way.
+                if (decision == 0 && !g_permContainers && !g_inBuy &&
+                    ((srcClass == 1 && handIsBuilding(dstHand)) ||
+                     (dstClass == 1 && handIsBuilding(srcHand))))
+                    decision = 2;
             }
         } __except (EXCEPTION_EXECUTE_HANDLER) { decision = 0; }
         // Diagnostic (A1): under dump, log every add that touches a squad member on
@@ -844,8 +878,9 @@ bool __fastcall tryAddItem_hook(Inventory* self, Item* item, int quantity) {
                 b[sizeof(b) - 1] = '\0'; coop::logLine(b);
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
-        if (g_blockXfer && decision == 1) {
-            __try {
+        if (decision == 2) notePermRefusal(2, "storage container use");
+        if ((g_blockXfer && decision == 1) || decision == 2) {
+            if (decision == 1) __try {
                 char sid[48]; sid[0] = '\0';
                 GameData* gd = item->getGameData();
                 if (gd) { strncpy(sid, gd->stringID.c_str(), sizeof(sid) - 1); sid[sizeof(sid) - 1] = '\0'; }
@@ -1111,6 +1146,9 @@ Building* __fastcall createBuilding_hook(
 typedef void (__fastcall* PlaceFinalFn)(PreviewBuilding* self);
 PlaceFinalFn g_placeFinalOrig = 0;
 void __fastcall placeFinal_hook(PreviewBuilding* self) {
+    // Host setting (protocol 56): the build-mode commit is the player placing a
+    // new building; a join the host forbade from building simply does not place.
+    if (!g_permBuild) { notePermRefusal(1, "placing buildings"); return; }
     g_placeFinalOrig(self);
     __try {
         if (!self) return;
@@ -2193,6 +2231,18 @@ bool installXferBlockHook() {
 }
 
 void setBlockXfer(bool on)                    { g_blockXfer = on; }
+void setJoinPermissions(bool build, bool containers, bool buy) {
+    if (build != g_permBuild || containers != g_permContainers || buy != g_permBuy) {
+        char b[112];
+        _snprintf(b, sizeof(b) - 1, "[perm] join permissions: build=%d containers=%d buy=%d",
+                  build ? 1 : 0, containers ? 1 : 0, buy ? 1 : 0);
+        b[sizeof(b) - 1] = '\0';
+        coop::logLine(b);
+    }
+    g_permBuild = build; g_permContainers = containers; g_permBuy = buy;
+}
+unsigned int permRefusalSeq()  { return g_permRefusalSeq; }
+int          permRefusalKind() { return g_permRefusalKind; }
 void setInvOwnerClassifier(InvOwnerClassFn fn) { g_invOwnerClass = fn; }
 
 // Query-free ground-drop capture: detour the dropItem _NV_ twin.

@@ -104,7 +104,12 @@ Copy-Item $mod  (Join-Path $modDir "KenshiCoop.mod")
   // Older copies of each save kept before it is overwritten (0 = off), in
   // %LOCALAPPDATA%\kenshi\KenshiCoop_backups\<save>\<date_time>\ - copy one back
   // into your save folder to restore it.
-  "saveBackups": 3
+  "saveBackups": 3,
+  // HOST only: what the joining player may do. Also switchable live in the F2
+  // panel while hosting. true = allowed.
+  "joinCanBuild": true,
+  "joinCanUseContainers": true,
+  "joinCanBuy": true
 }
 '@ | Set-Content (Join-Path $modDir "coop_config.json") -Encoding UTF8
 

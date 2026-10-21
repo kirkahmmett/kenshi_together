@@ -142,6 +142,9 @@ public:
     // Symmetric and static (a fixture's position/template never change), so this
     // is first-sight plus a slow safety resend and idles at zero traffic.
     void queueFixture(const FixturePacket& pkt);
+    // MAIN thread (host): queue the join-permission set (protocol 56). Sent on
+    // connect, on change and on a slow safety resend by the caller.
+    void queuePerms(const PermsPacket& pkt);
     void queueBuildPlace(const BuildPlacePacket& pkt);
     void queueBuildState(const BuildStatePacket& pkt);
     void queueBuildDoor(const BuildDoorPacket& pkt);
@@ -317,6 +320,8 @@ private:
     std::vector<DeedPacket>      outDeed_;
     // Reliable runtime-fixture identity rows (protocol 55). Guarded by outCs_.
     std::vector<FixturePacket>   outFixture_;
+    // Reliable join-permission sets (protocol 56, host -> join). Guarded by outCs_.
+    std::vector<PermsPacket>     outPerms_;
     std::vector<BuildPlacePacket> outBuildPlace_;
     std::vector<BuildStatePacket> outBuildState_;
     std::vector<BuildDoorPacket>  outBuildDoor_;

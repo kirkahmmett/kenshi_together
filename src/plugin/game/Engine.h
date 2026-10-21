@@ -743,6 +743,15 @@ void setInvOwnerClassifier(InvOwnerClassFn fn);
 // default until set; the veto only fires when a classifier is also registered.
 void setBlockXfer(bool on);
 
+// Host settings for what a join may do (protocol 56, issue #42), enforced on
+// the JOIN in the build-commit, buyItem and inventory-add detours. Everything
+// allowed until the host says otherwise; the host itself never calls this.
+void setJoinPermissions(bool build, bool containers, bool buy);
+// Refusal counter + the kind of the latest one (1 build, 2 storage, 3 buy), so
+// the plugin can show the player why an action did nothing.
+unsigned int permRefusalSeq();
+int          permRefusalKind();
+
 // Detour Inventory::tryAddItem + removeItemDontDestroy_returnsItem for the veto
 // (and for diagnostic drag-sequence logging under KENSHICOOP_INV_DUMP=1).
 // Returns true if both detours installed.
