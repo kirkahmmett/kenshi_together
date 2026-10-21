@@ -34,12 +34,12 @@ Toolchain, `build_plugin.cmd`'deki sabit yollardan okunuyor:
 | VC++ 2010 x86+x64 redistributable (`cl.exe` `msvcr100.dll` ister) | sistem |
 | VS2022 Build Tools: **MSBuild + `Microsoft.VisualStudio.Component.VC.CoreBuildTools`** (C++ hedefleri; yalnız MSBuild yetmez, `MSB4019 Microsoft.Cpp.Default.props` verir) | `vswhere` ile bulunur |
 | KenshiLib_Examples_deps (git-LFS; boost_1_60_0 + Ogre/MyGUI lib) | `third_party/KenshiLib_deps/` |
-| **KenshiLib v0.4.1 SDK** (header + `KenshiLib.lib`; bkz. aşağısı) | şu an `C:\Users\pc\Downloads\kenshilib-v0.4.1\sdk` |
+| **KenshiLib v0.4.1 SDK** (header + `KenshiLib.lib`; bkz. aşağısı) | `third_party/KenshiLib_sdk/` (git-ignored) ya da `%KENSHILIB_SDK%` |
 | ENet 1.3.18 + `third_party/enet/patches/0001` (C89 for-loops) ve `0002` (Steam socket hooks), patch'ler **repo kökünden** `git apply` ile | `third_party/enet/enet/` |
 
 ```bash
 cmd //c scripts\build_prototest.cmd         # dist\prototest.exe (wire-protocol unit testleri) - stok script çalışır
-cmd //c scripts\build_plugin.cmd            # Harness - DİKKAT: stok script KenshiLib_deps (0.4.0) kullanır ve FAIL eder
+cmd //c scripts\build_plugin.cmd            # Harness (KenshiLib SDK seçimi aşağıda; seçtiği yolu ekrana yazar)
 cmd //c scripts\build_plugin.cmd Release    # oyunculara giden DLL (senaryo kodu yok)
 ```
 
@@ -56,18 +56,16 @@ Release 0 hatayla derleniyor; Release DLL `KenshiLib.dll`'den yayınlanan v0.51 
 ediyor ve boyutu aynı (1.027.072 byte). Bu semboller KenshiLib 0.3.0'dan beri mevcut, yani oyuncu tarafında daha yeni
 bir `KenshiLib.dll` gerekmiyor (oyunda doğrulanmadı).
 
-SDK kurulumu (repo dışında, ~7 MB):
+`build_plugin.cmd` KenshiLib header ve lib'lerini şu sırayla seçer: `%KENSHILIB_SDK%` → `third_party\KenshiLib_sdk`
+→ `third_party\KenshiLib_deps` (bu sonuncusu master'da 0.4.0 olduğu için derlemez). Boost her zaman
+`third_party\KenshiLib_deps\boost_1_60_0`'dan gelir. SDK kurulumu (~7 MB):
 ```bash
-B=/c/Users/pc/Downloads/kenshilib-v0.4.1
-git clone --depth 1 --branch v0.4.1 https://github.com/BFrizzleFoShizzle/KenshiLib.git $B/src
-mkdir -p $B/sdk/KenshiLib/Libraries && cp -r $B/src/Include $B/sdk/KenshiLib/Include
-# KenshiLib.lib: release asset KenshiLib_v0.4.1.zip (sha256 4ab75418...ffa0) içinden
-# OgreMain_x64.lib + MyGUIEngine_x64.lib: $B/src/Libraries/{ogre,mygui}/ (KenshiLib_deps'tekilerle byte-aynı)
+T=third_party/KenshiLib_sdk; TMP=$(mktemp -d)
+git clone --depth 1 --branch v0.4.1 https://github.com/BFrizzleFoShizzle/KenshiLib.git $TMP/src
+mkdir -p $T/KenshiLib/Libraries && cp -r $TMP/src/Include $T/KenshiLib/Include
+cp $TMP/src/Libraries/ogre/OgreMain_x64.lib $TMP/src/Libraries/mygui/MyGUIEngine_x64.lib $T/KenshiLib/Libraries/
+# KenshiLib.lib: release asset KenshiLib_v0.4.1.zip (sha256 4ab75418bd98886a06d72fbb6d92c6dc9b5c8a0881d301ef96127a4bb0a8ffa0) içinden
 ```
-
-**Açık iş:** `build_plugin.cmd` `KL` yolunu sabit olarak `third_party\KenshiLib_deps` yapıyor. v0.4.1 SDK'sını
-kullanabilmesi için script'e bir override (ör. `KENSHILIB_SDK` env değişkeni) eklenmeli. O yapılana kadar derleme,
-`KL`'yi SDK'ya, boost'u `third_party\KenshiLib_deps\boost_1_60_0`'a gösteren bir wrapper ile yapılıyor.
 
 ### Toolchain kurulum tuzakları (bu makinede yaşandı)
 
