@@ -606,6 +606,10 @@ struct Config {
     // virtual-key code. RE_Kenshi binds F2-F4 to game speed by default, so a
     // player whose F2 changes speed can move the panel to a free key.
     int                panelKeyVk;
+
+    // Rolling save backups kept per save name ("saveBackups" in coop_config.json
+    // or KENSHICOOP_SAVE_BACKUPS; default 3, 0 = off). See sync/SaveXfer.h.
+    int                saveBackups;
 };
 
 // "F1".."F12" (any case) -> virtual-key code (VK_F1 = 0x70); anything else -> F2.

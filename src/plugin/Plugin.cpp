@@ -237,6 +237,12 @@ inline unsigned __int64 perfNow() {
     } else { stmt; } \
 } while (0)
 
+// Pre-save hook target: copy the save folder Kenshi is about to overwrite into
+// the rolling backups (sync/SaveXfer.h). A first save has nothing to copy.
+void backupBeforeSave(const char* name, bool /*autosave*/) {
+    if (name && name[0]) coop::savexfer::backupCopy(name);
+}
+
 // End-of-hook: close the tick and, once per window, log the line and restart.
 void perfEndTick(unsigned __int64 hookT0) {
     if (!g_perfWindowMs) return;
@@ -2339,6 +2345,17 @@ void installEngineDetours() {
                 : "[save] save detour installed; save-edge logging ON");
         else
             coopLog("[save] FAILED to install save detour; coordinated save degraded");
+    }
+    // Rolling backups: the join keeps each save a transfer replaces (SaveXfer),
+    // and every local write copies the folder it is about to overwrite first.
+    coop::savexfer::setBackupKeep(g_cfg.saveBackups);
+    coop::engine::setPreSaveCallback(&backupBeforeSave);
+    {
+        char b[96];
+        _snprintf(b, sizeof(b) - 1, "[save] rolling backups: keep %d per save (saveBackups)",
+                  g_cfg.saveBackups);
+        b[sizeof(b) - 1] = '\0';
+        coopLog(b);
     }
 
     // Coordinated load (protocol 32): detour SaveManager::load so every local

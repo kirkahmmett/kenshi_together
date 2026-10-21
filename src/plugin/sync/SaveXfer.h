@@ -64,6 +64,25 @@ bool saveNameSafe(const std::string& name);
 // before it re-stages.
 void recoverStrandedSave(const std::string& name);
 
+// ---- Rolling save backups ------------------------------------------------------
+// Every save a coordinated session replaces is kept, newest `keep` per save name,
+// under %LOCALAPPDATA%\kenshi\KenshiCoop_backups\<name>\<YYYYMMDD_HHMMSS>\ - OUTSIDE
+// the save folder, so they never show up in Kenshi's load menu. To restore one,
+// copy it back to the save folder under any name. keep = 0 turns backups off.
+void        setBackupKeep(int keep);   // Config "saveBackups" (default 3)
+int         backupKeep();
+std::string backupRoot();
+// Join: the commit's displaced save/<name>__old becomes a backup by a
+// same-volume MOVE (free). False = not kept (off, unsafe name, or the move
+// failed); the caller then deletes it as before.
+bool backupMove(const std::string& name, const std::string& folder);
+// Host: COPY save/<name> before Kenshi overwrites it. Kenshi may write only the
+// files that changed, so the folder must not be moved away. Blocks while it
+// copies (logged with its duration). False when there is nothing to back up.
+bool backupCopy(const std::string& name);
+// Drop the oldest backups of <name> beyond `keep`. Returns how many it removed.
+int  pruneBackups(const std::string& name);
+
 // Recursive inventory of 'folder': file count, total bytes, and the newest
 // last-write FILETIME (as u64). Returns false when the folder doesn't exist.
 bool folderInventory(const std::string& folder, unsigned int* outFiles,

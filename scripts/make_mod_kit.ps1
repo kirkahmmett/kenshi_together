@@ -97,7 +97,14 @@ Copy-Item $mod  (Join-Path $modDir "KenshiCoop.mod")
   "transport": "steam",
   "ip": "127.0.0.1",
   "port": 27800,
-  "autoConnect": false
+  "autoConnect": false,
+  // Key that opens the co-op panel, "F1".."F12". RE_Kenshi uses F2-F4 for game
+  // speed by default; if F2 also changes your speed, pick a free key here.
+  "panelKey": "F2",
+  // Older copies of each save kept before it is overwritten (0 = off), in
+  // %LOCALAPPDATA%\kenshi\KenshiCoop_backups\<save>\<date_time>\ - copy one back
+  // into your save folder to restore it.
+  "saveBackups": 3
 }
 '@ | Set-Content (Join-Path $modDir "coop_config.json") -Encoding UTF8
 

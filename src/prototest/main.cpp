@@ -874,6 +874,7 @@ static void testSaveXferRoundTrip() {
 
     savexfer::setSaveRootForTest(std::string()); // unpin
     xferNukeDir(rootStr);
+    xferNukeDir(rootStr + "_backups");
 }
 
 // Data-safety of the save-transfer RECEIVER (upstream PR #16): no transfer may
@@ -947,7 +948,85 @@ static void testSaveXferSafety() {
 
     savexfer::setSaveRootForTest(std::string());
     xferNukeDir(rootStr);
+    xferNukeDir(rootStr + "_backups");
     xferNukeDir(outside);
+}
+
+// Rolling save backups: every save a commit replaces is kept (newest N per
+// name) outside the save root, and the host-side copy reproduces the folder.
+static int xferCountDirs(const std::string& dir) {
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA((dir + "\\*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    int n = 0;
+    do {
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && fd.cFileName[0] != '.') ++n;
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return n;
+}
+
+static void testSaveBackups() {
+    std::printf("== rolling save backups ==\n");
+    char tmp[MAX_PATH]; tmp[0] = '\0';
+    GetTempPathA(sizeof(tmp), tmp);
+    char root[MAX_PATH];
+    _snprintf(root, sizeof(root) - 1, "%skc_backup_test_%lu", tmp,
+              (unsigned long)GetCurrentProcessId());
+    root[sizeof(root) - 1] = '\0';
+    std::string rootStr = root;
+    xferNukeDir(rootStr); xferNukeDir(rootStr + "_backups");
+    CreateDirectoryA(rootStr.c_str(), 0);
+    savexfer::setSaveRootForTest(rootStr);
+    savexfer::setBackupKeep(3);
+
+    // Five versions of one save, committed in turn: the first replaces nothing,
+    // the next four each displace the previous one into a backup.
+    std::vector<unsigned char> v(2000);
+    XferSrcFile srcs[1];
+    srcs[0].rel = "quick.save"; srcs[0].len = (unsigned)v.size();
+    for (int ver = 0; ver < 5; ++ver) {
+        for (unsigned i = 0; i < v.size(); ++i) v[i] = (unsigned char)(i + ver * 31);
+        srcs[0].data = &v[0];
+        xferRun("bk", srcs, 1, 100 + ver, -1);
+    }
+    std::string bdir = savexfer::backupRoot() + "\\bk";
+    CHECK_EQ("backups: pruned to keep=3", xferCountDirs(bdir), 3);
+
+    // The newest backup is version 3 (the one version 4 replaced).
+    WIN32_FIND_DATAA fd; std::string newest;
+    HANDLE h = FindFirstFileA((bdir + "\\*").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do { if (fd.cFileName[0] != '.' && std::string(fd.cFileName) > newest) newest = fd.cFileName; }
+        while (FindNextFileA(h, &fd));
+        FindClose(h);
+    }
+    std::vector<unsigned char> got;
+    bool read = xferReadWhole(bdir + "\\" + newest + "\\quick.save", &got);
+    CHECK("backups: newest holds the replaced version",
+          read && got.size() == v.size() && got[0] == (unsigned char)(0 + 3 * 31));
+    CHECK("backups: the live save is the latest version",
+          xferReadWhole(savexfer::saveFolderFor("bk") + "\\quick.save", &got) &&
+          got[0] == (unsigned char)(0 + 4 * 31));
+
+    // Host side: copy (not move) - the live save stays, the copy matches it.
+    CHECK("backups: host copy made", savexfer::backupCopy("bk"));
+    CHECK("backups: host copy leaves the live save", xferExists(savexfer::saveFolderFor("bk") + "\\quick.save"));
+    CHECK_EQ("backups: host copy still pruned to 3", xferCountDirs(bdir), 3);
+    CHECK("backups: no copy of a save that does not exist", !savexfer::backupCopy("nosuch"));
+
+    // keep = 0: nothing kept, the displaced save is deleted as before.
+    savexfer::setBackupKeep(0);
+    for (unsigned i = 0; i < v.size(); ++i) v[i] = (unsigned char)(i + 7);
+    xferRun("off", srcs, 1, 200, -1);
+    xferRun("off", srcs, 1, 201, -1);
+    CHECK_EQ("backups: off keeps nothing", xferCountDirs(savexfer::backupRoot() + "\\off"), 0);
+    CHECK("backups: off leaves no __old behind", !xferExists(savexfer::saveFolderFor("off") + "__old"));
+
+    savexfer::setBackupKeep(3);
+    savexfer::setSaveRootForTest(std::string());
+    xferNukeDir(rootStr);
+    xferNukeDir(rootStr + "_backups");
 }
 
 // ---- 4. Content hash (the inventory convergence key) -----------------------------
@@ -1923,6 +2002,7 @@ int main() {
     testFolderFingerprint();
     testSaveXferRoundTrip();
     testSaveXferSafety();
+    testSaveBackups();
     testContentHash();
     testInterp();
     testOwnRanks();

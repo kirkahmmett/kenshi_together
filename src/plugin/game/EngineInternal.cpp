@@ -97,6 +97,7 @@ SaveMgrExecFn g_saveMgrExecFn = 0;
 std::vector<SaveEdgeRec> g_saveEdges;
 bool g_saveSuppressAll = false;
 SaveMgrSaveNameFn g_saveHookOrig = 0;
+PreSaveFn g_preSave = 0; // setPreSaveCallback: rolling backups before the write
 
 void __fastcall saveMgrSave_hook(SaveManager* self, const std::string* name,
                                  bool autosave) {
@@ -109,6 +110,7 @@ void __fastcall saveMgrSave_hook(SaveManager* self, const std::string* name,
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) { nm[0] = '\0'; }
     const bool suppress = g_saveSuppressAll;
+    if (!suppress && g_preSave && nm[0]) g_preSave(nm, autosave);
     if (!suppress) g_saveHookOrig(self, name, autosave);
     __try {
         SaveEdgeRec r;
@@ -2096,6 +2098,7 @@ bool installSaveHook() {
 }
 
 void setSaveSuppress(bool on) { g_saveSuppressAll = on; }
+void setPreSaveCallback(PreSaveFn fn) { g_preSave = fn; }
 
 unsigned int drainSaveEdges(SaveEdge* out, unsigned int maxOut) {
     unsigned int n = 0;

@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
 #include <vector>
 
 namespace coop {
@@ -228,6 +229,36 @@ unsigned __int64 g_watchBaseWrite  = 0;
 unsigned int  g_watchCurFiles   = 0;
 unsigned __int64 g_watchCurBytes = 0;
 
+// Rolling save backups kept per save name (0 = off). See backupMove/backupCopy.
+int           g_backupKeep      = 3;
+
+// Recursive copy of folder 'from' to 'to' (created). Returns the number of files
+// copied, or -1 on any failure (a partial copy is removed by the caller).
+int copyTree(const std::string& from, const std::string& to, int depth) {
+    if (depth > 6) return -1;
+    if (!CreateDirectoryA(to.c_str(), 0) && GetLastError() != ERROR_ALREADY_EXISTS) return -1;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pathJoin(from, "*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    int n = 0;
+    do {
+        if (fd.cFileName[0] == '.' &&
+            (fd.cFileName[1] == '\0' || (fd.cFileName[1] == '.' && fd.cFileName[2] == '\0')))
+            continue;
+        std::string s = pathJoin(from, fd.cFileName), d = pathJoin(to, fd.cFileName);
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            int k = copyTree(s, d, depth + 1);
+            if (k < 0) { n = -1; break; }
+            n += k;
+        } else {
+            if (!CopyFileA(s.c_str(), d.c_str(), FALSE)) { n = -1; break; }
+            ++n;
+        }
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return n;
+}
+
 } // namespace
 
 #ifdef KENSHICOOP_PROTOTEST
@@ -236,6 +267,95 @@ unsigned __int64 g_watchCurBytes = 0;
 static std::string g_testSaveRoot;
 void setSaveRootForTest(const std::string& root) { g_testSaveRoot = root; }
 #endif
+
+// ---- Rolling save backups ----------------------------------------------------
+void setBackupKeep(int keep) { g_backupKeep = keep < 0 ? 0 : keep; }
+int  backupKeep() { return g_backupKeep; }
+
+std::string backupRoot() {
+#ifdef KENSHICOOP_PROTOTEST
+    if (!g_testSaveRoot.empty()) return g_testSaveRoot + "_backups";
+#endif
+    const char* lad = getenv("LOCALAPPDATA");
+    return pathJoin(lad ? lad : "", "kenshi\\KenshiCoop_backups");
+}
+
+namespace {
+// A fresh, sortable slot under <backupRoot>\<name>: YYYYMMDD_HHMMSS[_n].
+std::string newBackupSlot(const std::string& name) {
+    std::string dir = pathJoin(backupRoot(), name);
+    ensureParentDirs(pathJoin(dir, "x"));
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    char stamp[32];
+    _snprintf(stamp, sizeof(stamp) - 1, "%04u%02u%02u_%02u%02u%02u",
+              st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    stamp[sizeof(stamp) - 1] = '\0';
+    std::string slot = pathJoin(dir, stamp);
+    for (int i = 2; GetFileAttributesA(slot.c_str()) != INVALID_FILE_ATTRIBUTES && i < 100; ++i) {
+        char b[48];
+        _snprintf(b, sizeof(b) - 1, "%s_%d", stamp, i);
+        b[sizeof(b) - 1] = '\0';
+        slot = pathJoin(dir, b);
+    }
+    return slot;
+}
+} // namespace
+
+int pruneBackups(const std::string& name) {
+    std::string dir = pathJoin(backupRoot(), name);
+    std::vector<std::string> slots;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pathJoin(dir, "*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || fd.cFileName[0] == '.') continue;
+        slots.push_back(fd.cFileName);
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    std::sort(slots.begin(), slots.end()); // stamps sort oldest first
+    int removed = 0;
+    for (size_t i = 0; i + (size_t)g_backupKeep < slots.size(); ++i) {
+        removeTree(pathJoin(dir, slots[i]), 0);
+        ++removed;
+    }
+    return removed;
+}
+
+bool backupMove(const std::string& name, const std::string& folder) {
+    if (g_backupKeep <= 0 || !saveNameSafe(name)) return false;
+    std::string slot = newBackupSlot(name);
+    if (!MoveFileExA(folder.c_str(), slot.c_str(), MOVEFILE_WRITE_THROUGH)) return false;
+    pruneBackups(name);
+    char b[320];
+    _snprintf(b, sizeof(b) - 1, "[save] BACKUP kept previous '%s' -> '%s' (keep %d)",
+              name.c_str(), slot.c_str(), g_backupKeep);
+    b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    return true;
+}
+
+bool backupCopy(const std::string& name) {
+    if (g_backupKeep <= 0 || !saveNameSafe(name)) return false;
+    std::string src = saveFolderFor(name);
+    if (GetFileAttributesA(src.c_str()) == INVALID_FILE_ATTRIBUTES) return false; // first save
+    DWORD t0 = GetTickCount();
+    std::string slot = newBackupSlot(name);
+    int n = copyTree(src, slot, 0);
+    if (n < 0) {
+        removeTree(slot, 0);
+        char e[256];
+        _snprintf(e, sizeof(e) - 1, "[save] BACKUP copy of '%s' FAILED - no backup this save",
+                  name.c_str());
+        e[sizeof(e) - 1] = '\0'; coop::logErrLine(e);
+        return false;
+    }
+    pruneBackups(name);
+    char b[320];
+    _snprintf(b, sizeof(b) - 1, "[save] BACKUP copied '%s' (%d files, %lu ms) -> '%s' (keep %d)",
+              name.c_str(), n, GetTickCount() - t0, slot.c_str(), g_backupKeep);
+    b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    return true;
+}
 
 std::string saveFolderFor(const std::string& name) {
     std::string root;
@@ -762,7 +882,9 @@ int onSaveDone(const SaveDoneHeader& d, const u32* crcs,
             if (hadOld) MoveFileExA(oldDir.c_str(), finalDir.c_str(),
                                     MOVEFILE_WRITE_THROUGH); // restore
         }
-        if (ok && hadOld) removeTree(oldDir, 0);
+        // The replaced save becomes a rolling backup (a same-volume move, so
+        // free); only if that fails - or backups are off - is it deleted.
+        if (ok && hadOld && !backupMove(g_recvName, oldDir)) removeTree(oldDir, 0);
     }
     if (!ok) removeTree(g_recvStaging, 0); // never leave a half-written loadable save
 

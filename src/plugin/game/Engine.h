@@ -67,6 +67,11 @@ bool installSaveHook();
 // authoritative; a manual edge is forwarded as PKT_SAVE_REQ instead).
 void setSaveSuppress(bool on);
 unsigned int drainSaveEdges(SaveEdge* out, unsigned int maxOut);
+// Called on the main thread just BEFORE Kenshi writes a (non-suppressed) local
+// save, with the save's folder name - the moment the folder still holds the
+// previous save. Used for rolling backups. 0 = none.
+typedef void (*PreSaveFn)(const char* name, bool autosave);
+void setPreSaveCallback(PreSaveFn fn);
 
 // ---- Protocol 32: coordinated load ------------------------------------------
 // One local load edge captured by the SaveManager::load detour (in-game load
