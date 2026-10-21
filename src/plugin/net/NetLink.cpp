@@ -39,6 +39,19 @@ void netLog(const char* msg) {
     buf[sizeof(buf) - 1] = '\0';
     coop::logLine(buf);
 }
+
+// The last net error, for the panel (NetLink::lastError). Written from both the
+// net and the main thread, so it sits behind a tiny spin lock (no static-init
+// order problem, unlike a CRITICAL_SECTION object at namespace scope).
+volatile LONG g_lastErrLock = 0;
+char          g_lastErr[256] = { 0 };
+void setLastErr(const char* msg) {
+    while (InterlockedCompareExchange(&g_lastErrLock, 1, 0) != 0) Sleep(0);
+    _snprintf(g_lastErr, sizeof(g_lastErr) - 1, "%s", msg ? msg : "");
+    g_lastErr[sizeof(g_lastErr) - 1] = '\0';
+    InterlockedExchange(&g_lastErrLock, 0);
+}
+
 void netErr(const char* msg) {
     OutputDebugStringA("[KenshiCoop/net] ERROR: ");
     OutputDebugStringA(msg ? msg : "");
@@ -47,6 +60,7 @@ void netErr(const char* msg) {
     _snprintf(buf, sizeof(buf) - 1, "[net] %s", msg ? msg : "");
     buf[sizeof(buf) - 1] = '\0';
     coop::logErrLine(buf);
+    setLastErr(msg);
 }
 
 // Monotonic ms clock for the batch send stamp (v35). QPC, not GetTickCount:
@@ -96,12 +110,21 @@ NetLink::~NetLink() {
 
 bool NetLink::startHost(int port, Inbound* inbound) {
     isHost_ = true; port_ = port; inbound_ = inbound; myId_ = 0;
+    setLastErr("");
     return launchThread();
 }
 
 bool NetLink::startClient(const std::string& ip, int port, Inbound* inbound) {
     isHost_ = false; ip_ = ip; port_ = port; inbound_ = inbound; myId_ = 0;
+    setLastErr("");
     return launchThread();
+}
+
+std::string NetLink::lastError() {
+    while (InterlockedCompareExchange(&g_lastErrLock, 1, 0) != 0) Sleep(0);
+    std::string s = g_lastErr;
+    InterlockedExchange(&g_lastErrLock, 0);
+    return s;
 }
 
 bool NetLink::launchThread() {
@@ -402,6 +425,10 @@ void NetLink::threadLoop() {
 
     u32   nextId = 1;
     DWORD lastConnectAttempt = GetTickCount();
+    // Join: did the current connection reach CONNECT / WELCOME? A host that
+    // closes us between the two refused us (it rejects a protocol mismatch
+    // right after HELLO); a connect that never reached CONNECT is unreachable.
+    bool  linkUp = false, gotWelcome = false;
 
     // Wall-clock time-sync state (client only). The join pings every ~2 s; each
     // pong yields an (rtt, offset) sample; the minimum-RTT sample wins (NTP
@@ -489,6 +516,8 @@ void NetLink::threadLoop() {
                         // a version mismatch is rejected before we admit it.
                         netLog("peer connecting (awaiting HELLO)");
                     } else {
+                        linkUp = true; gotWelcome = false;
+                        setLastErr("");
                         // Introduce ourselves with our protocol version.
                         HelloPacket h;
                         h.type = (u8)PKT_HELLO; h.version = PROTOCOL_VERSION; h.nameLen = 0;
@@ -549,6 +578,7 @@ void NetLink::threadLoop() {
                                 b[sizeof(b) - 1] = '\0';
                                 netErr(b);
                             } else {
+                                gotWelcome = true;
                                 InterlockedExchange(&myId_, (LONG)w.playerId);
                                 char b[96];
                                 _snprintf(b, sizeof(b) - 1,
@@ -1022,6 +1052,19 @@ void NetLink::threadLoop() {
                         serverPeer_ = 0;
                         if (inbound_) inbound_->pushLeave(OWNER_ID_ALL);
                         netLog("disconnected from host");
+                        if (linkUp && !gotWelcome) {
+                            netErr("the host closed the connection before admitting us - "
+                                   "most likely a different KenshiCoop version");
+                        } else if (!linkUp) {
+                            // Unreachable: no log line (this repeats every retry);
+                            // the panel shows it.
+                            char b[160];
+                            _snprintf(b, sizeof(b) - 1, "cannot reach the host at %s:%d - "
+                                      "is it ONLINE as HOST?", steam ? "Steam" : ip_.c_str(), port_);
+                            b[sizeof(b) - 1] = '\0';
+                            setLastErr(b);
+                        }
+                        linkUp = false; gotWelcome = false;
                     }
                     break;
                 }

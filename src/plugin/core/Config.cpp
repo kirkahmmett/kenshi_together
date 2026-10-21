@@ -263,6 +263,7 @@ void loadConfig(Config& c) {
         std::string ac = envOr("KENSHICOOP_AUTOCONNECT", fileOr(f, "autoConnect", "0").c_str());
         c.autoConnect = (ac == "1" || ac == "true");
     }
+    c.panelKeyVk = parsePanelKey(envOr("KENSHICOOP_PANEL_KEY", fileOr(f, "panelKey", "F2").c_str()));
 
     // Protocol 36 movement-smoothness knobs. Defaults are the historical
     // constants; any positive env value overrides for live A/B tuning.
@@ -487,6 +488,17 @@ std::string describeConfig(const Config& c) {
     b[sizeof(b) - 1] = '\0';
     s += b;
     return s;
+}
+
+int parsePanelKey(const std::string& s) {
+    const int VK_F1_CODE = 0x70; // VK_F1; VK_F1..VK_F12 are consecutive
+    if (s.size() >= 2 && (s[0] == 'F' || s[0] == 'f')) {
+        bool digits = true;
+        for (size_t i = 1; i < s.size(); ++i) if (s[i] < '0' || s[i] > '9') digits = false;
+        int n = std::atoi(s.c_str() + 1);
+        if (digits && n >= 1 && n <= 12) return VK_F1_CODE + n - 1;
+    }
+    return VK_F1_CODE + 1; // F2
 }
 
 void reloadPeerFromFile(Config& c) {

@@ -213,6 +213,11 @@ public:
     // publish lock for the snapshot clear).
     void bumpSessionEpoch();
 
+    // The last error the net layer logged ("" = none since the last start):
+    // what the panel shows a player whose session failed (a protocol mismatch,
+    // a port in use, a host that refused us). Thread-safe.
+    static std::string lastError();
+
     bool isRunning() const { return running_ != 0; }
     // host = 0; client = id from WELCOME. myId_ is written by the NET thread when
     // the WELCOME arrives and read here on the MAIN thread, so it is a volatile

@@ -600,7 +600,16 @@ struct Config {
     // A test scenario or KENSHICOOP_TEST_SECONDS ALWAYS auto-starts regardless
     // (the unattended harness never touches the panel); see Plugin.cpp.
     bool               autoConnect;
+
+    // Key that toggles the co-op panel: "panelKey" in coop_config.json or
+    // KENSHICOOP_PANEL_KEY, "F1".."F12" (default F2). Stored as the Win32
+    // virtual-key code. RE_Kenshi binds F2-F4 to game speed by default, so a
+    // player whose F2 changes speed can move the panel to a free key.
+    int                panelKeyVk;
 };
+
+// "F1".."F12" (any case) -> virtual-key code (VK_F1 = 0x70); anything else -> F2.
+int parsePanelKey(const std::string& s);
 
 // Read every KENSHICOOP_* var into 'out', applying host/join defaults. Values in
 // coop_config.json (next to the DLL) are used as the defaults, so precedence is

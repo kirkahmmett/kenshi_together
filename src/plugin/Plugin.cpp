@@ -788,6 +788,9 @@ void coopPanelDrive() {
     ps.peerPresent  = g_peerPresent;
     ps.isHost       = g_cfg.isHost;
     ps.transportSel = (g_cfg.transport == "steam") ? 0 : 1;
+    // The last net error rides on the status line (panel AND the top-left
+    // banner), so a session that is failing says why without opening a log.
+    std::string lastErr = coop::NetLink::lastError();
     std::string detail;
     int ostate;
     if (g_peerPresent) {
@@ -795,9 +798,14 @@ void coopPanelDrive() {
         ostate = 2;
     } else if (g_net.isRunning()) {
         detail = g_cfg.isHost ? "Hosting - waiting for peer..." : "Connecting...";
+        if (!lastErr.empty()) detail += " (" + lastErr + ")";
         ostate = 1;
     } else {
-        detail = "Offline - press F2, then set Connection to ONLINE";
+        char kb[96];
+        _snprintf(kb, sizeof(kb) - 1, "Offline - press F%d, then set Connection to ONLINE",
+                  g_cfg.panelKeyVk - 0x70 + 1);
+        kb[sizeof(kb) - 1] = '\0';
+        detail = lastErr.empty() ? std::string(kb) : ("Offline - " + lastErr);
         ostate = 0;
     }
     ps.detail = detail.c_str();
@@ -827,8 +835,21 @@ void coopPanelDrive() {
     }
     ps.transferDetail = transfer.empty() ? (const char*)0 : transfer.c_str();
 
-    // Still pump Steam callbacks so an inbound "Join Game" (a friend inviting
-    // US) can fire coopUiConnect; the outbound invite/picker UI is gone.
+    // Outbound Steam invite for the panel's host rows (the panel shows them only
+    // to an offline HOST on STEAM, and only once the invite layer is ready).
+    static coop::engine::CoopInviteApi s_invite = {
+        &coop::steaminvite::ready,        &coop::steaminvite::beginInvite,
+        &coop::steaminvite::inviteFriend, &coop::steaminvite::pickerActive,
+        &coop::steaminvite::friendCount,  &coop::steaminvite::friendId,
+        &coop::steaminvite::friendName,   &coop::steaminvite::friendState,
+        &coop::steaminvite::status
+    };
+    ps.invite = &s_invite;
+    ps.panelVk = g_cfg.panelKeyVk;
+    ps.lastError = lastErr.c_str();
+
+    // Pump Steam callbacks: an inbound "Join Game" (a friend inviting US) fires
+    // coopUiConnect, and the host's lobby/friend list advance here.
     coop::steaminvite::tick();
 
     coop::engine::coopPanelTick(&ps, &coopUiConnect, &coopUiDisconnect);
@@ -2438,7 +2459,10 @@ __declspec(dllexport) void startPlugin() {
     if (autoStart) {
         startNetworking();
     } else {
-        coopLog("KenshiCoop: session DEFERRED - press F2 in-game to pick role/transport, "
-                "enter the friend's Steam ID, and check CONNECTED");
+        char b[160];
+        _snprintf(b, sizeof(b) - 1, "KenshiCoop: session DEFERRED - press F%d in-game to pick "
+                  "role/transport and go ONLINE (panelKey)", g_cfg.panelKeyVk - 0x70 + 1);
+        b[sizeof(b) - 1] = '\0';
+        coopLog(b);
     }
 }

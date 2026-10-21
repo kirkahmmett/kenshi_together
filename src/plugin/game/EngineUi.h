@@ -24,6 +24,24 @@ namespace engine {
 // coop_config.json. The GUI layer stays session-agnostic: live status is passed IN
 // via *st and the user's actions are handed BACK through the callbacks (the plugin
 // root owns the session/config wiring). Main-thread only; SEH-guarded.
+
+// Outbound Steam invite, as function pointers so this GUI layer stays free of the
+// Steam/net code (the plugin root fills it from net/SteamInvite). The host opens
+// a lobby + friend list with begin(), then invite(id) sends a Steam lobby invite;
+// the friend accepts from Steam and both sides connect - no Steam IDs swapped.
+// friendState: 0 offline, 1 online, 2 playing Kenshi (the list is sorted by it).
+struct CoopInviteApi {
+    bool               (*ready)();
+    void               (*begin)();
+    void               (*invite)(unsigned long long friendId);
+    bool               (*pickerActive)();
+    int                (*friendCount)();
+    unsigned long long (*friendId)(int i);
+    const char*        (*friendName)(int i);
+    int                (*friendState)(int i);
+    const char*        (*status)();   // one-line invite status ("" when idle)
+};
+
 struct CoopPanelState {
     unsigned long long selfSteamId; // steamp2p::selfId (0 = Steam not up)
     unsigned long long peerSteamId; // config steamPeer fallback (0 = unset; pasted id wins)
@@ -37,6 +55,14 @@ struct CoopPanelState {
     // while a join receives the host's world (e.g. "Streaming host world... 42%
     // (3.1/7.4 MB)"). Set by coopPanelDrive, rendered in dbgVal.
     const char*        transferDetail;
+    // Outbound Steam invite (null = Steam invite layer not up). Offered only
+    // while the panel is armed as HOST over STEAM and not yet connected.
+    const CoopInviteApi* invite;
+    // Virtual-key code that toggles the panel (Config::panelKeyVk; 0 = F2).
+    int                panelVk;
+    // Last connection error worth showing the player (null/"" = none), e.g. a
+    // protocol mismatch. Shown on the panel's status line while offline.
+    const char*        lastError;
 };
 // The panel's role/transport selections at the moment Connect is hit. peerId is the
 // Steam ID pasted in-panel this session (0 if none), and overrides the config
