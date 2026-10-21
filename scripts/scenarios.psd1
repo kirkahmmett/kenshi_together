@@ -1498,6 +1498,17 @@
             Advisory = @('smoothness', 'anim_truth', 'march', 'clock_sync')
             Tier = 'full'; WanVariant = $false
         }
+        # bag_persist_race: the host saves 1 s after the join's edit (inside the
+        # inventory settle window - the race upstream PR #80 targets). Gated only
+        # on the post-reload outcome.
+        bag_persist_race = @{
+            DiagEnv = @{ KENSHICOOP_INV_SYNC = '1' }
+            Save = 'squad2'; Setup = ''; Tolerance = 6.0
+            PrimaryGate = 'bag_persist_race'
+            Gating   = @('bag_persist_race')
+            Advisory = @('smoothness', 'anim_truth', 'march', 'clock_sync')
+            Tier = 'full'; WanVariant = $false
+        }
 
         # bootstrap_stream: the missing-save "seamless join" proof (protocol
         # 31/32). NOT a run_test tier member and NOT run_test-drivable - it needs

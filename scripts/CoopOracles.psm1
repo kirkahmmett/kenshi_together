@@ -159,6 +159,7 @@ function Invoke-OneOracle {
         "load_sync"      { return (Test-LoadSync       -HostFile $HostLog -JoinFile $JoinLog) }
         "money_persist"  { return (Test-MoneyPersist   -HostFile $HostLog -JoinFile $JoinLog) }
         "bag_persist"    { return (Test-BagPersist     -HostFile $HostLog -JoinFile $JoinLog) }
+        "bag_persist_race" { return (Test-BagPersist   -HostFile $HostLog -JoinFile $JoinLog -Race) }
         "connect_bootstrap" { return (Test-ConnectBootstrap -HostFile $HostLog -JoinFile $JoinLog) }
         "connect_stream"    { return (Test-ConnectStream    -HostFile $HostLog -JoinFile $JoinLog) }
         "prod_probe"     { return (Test-ProdProbe      -HostFile $HostLog -JoinFile $JoinLog) }

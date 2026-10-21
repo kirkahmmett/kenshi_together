@@ -1351,10 +1351,17 @@ const char* const MoneyPersistScenario::SAVE_NAME = "coopresume";
 // Everything is a delta against each side's own pre-add count (the probe item
 // may already be in the fixture's bag). Fixture: squad2, whose two tab leaders
 // both wear backpacks.
+//
+// bag_persist_race is the same run with the host saving ONE second after the
+// join's edit - inside the inventory settle window, the race upstream PR #80
+// describes. There the pre-save latch is only reported (the edit may not have
+// arrived yet); what must hold is the outcome: the items are in the bag after
+// the reload on both sides.
 class BagPersistScenario : public TimedScenario {
 public:
-    BagPersistScenario()
-        : TimedScenario("bag_persist", /*evidenceMs=*/1000),
+    BagPersistScenario(const char* name, unsigned long latchAfterMs, bool requireReached)
+        : TimedScenario(name, /*evidenceMs=*/1000),
+          latchAfterMs_(latchAfterMs), requireReached_(requireReached),
           have_(false), type_(0), base_(-1), added_(0), latched_(false),
           latchCount_(-1), saveIssued_(false), saveOk_(false), ackSeen_(false),
           ackOk_(false), loadIssued_(false), loadOk_(false), sigWas2_(false),
@@ -1399,7 +1406,7 @@ public:
 
         // ---- Host: latch, then save + load ---------------------------------
         if (ctx.isHost) {
-            if (!latched_ && have_ && live && ctx.elapsedMs >= LATCH_AFTER_MS) {
+            if (!latched_ && have_ && live && ctx.elapsedMs >= latchAfterMs_) {
                 latched_ = true;
                 latchCount_ = engine::countInNestedContainer(ctx.gw, hand_, sid_, type_, 0);
                 char b[128];
@@ -1482,6 +1489,7 @@ public:
         if ((localDone && ctx.elapsedMs >= checkAtMs_ + TAIL_HOLD_MS) ||
             ctx.elapsedMs >= DURATION_MS) {
             bool reached = (latchCount_ >= 0 && base_ >= 0 && latchCount_ == base_ + ADD_QTY);
+            if (!requireReached_) reached = true; // race: reported in BPLATCH, not gated
             passed_ = ctx.isHost
                 ? (have_ && reached && saveOk_ && ackOk_ && loadOk_ && swapDone_ && postOk_)
                 : (have_ && added_ == ADD_QTY && swapDone_ && postOk_);
@@ -1493,7 +1501,6 @@ public:
 private:
     static const int           ADD_QTY          = 3;
     static const unsigned long ADD_AT_MS        = 8000;
-    static const unsigned long LATCH_AFTER_MS   = 30000;
     static const unsigned long SWAP_MIN_MS      = 400;
     static const unsigned long SYNC_CONFIRM_MS  = 3000;
     static const unsigned long SETTLE_MS        = 5000;
@@ -1511,6 +1518,8 @@ private:
         return engine::nestedContainerCount(gw, hand_) >= 1;
     }
 
+    unsigned long latchAfterMs_;   // when the host latches + saves
+    bool          requireReached_; // gate on the edit reaching the host pre-save
     bool          have_;
     unsigned int  type_;
     int           base_, added_;
@@ -1539,7 +1548,8 @@ Scenario* makeSessionScenario(const std::string& name) {
     if (name == "load_probe")     return new LoadProbeScenario();
     if (name == "load_sync")      return new LoadSyncScenario();
     if (name == "money_persist")  return new MoneyPersistScenario();
-    if (name == "bag_persist")    return new BagPersistScenario();
+    if (name == "bag_persist")      return new BagPersistScenario("bag_persist", 30000, true);
+    if (name == "bag_persist_race") return new BagPersistScenario("bag_persist_race", 9000, false);
     return 0;
 }
 

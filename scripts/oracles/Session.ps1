@@ -821,8 +821,13 @@ function Test-MoneyPersist {
 # the host's save + reload? The join bags ADD_QTY at 8 s; the host saves at 30 s,
 # well past every settle window. Each failure line names which leg broke, so a
 # FAIL tells "never reached the host" apart from "reached it, lost in the save".
+#
+# bag_persist_race (-Race): the host saves 1 s after the edit, inside the settle
+# window, so whether the edit reached the host before the save is reported, not
+# gated - only the post-reload outcome is.
 function Test-BagPersist {
-    param([string]$HostFile, [string]$JoinFile)
+    param([string]$HostFile, [string]$JoinFile, [switch]$Race)
+    $gateName = if ($Race) { "bag_persist_race" } else { "bag_persist" }
     $why = @()
 
     foreach ($side in @(@($HostFile, 'host'), @($JoinFile, 'join'))) {
@@ -848,7 +853,11 @@ function Test-BagPersist {
     else {
         $latchCount = [int]$latch.Matches[0].Groups[1].Value
         if ($added -gt 0 -and $latchCount -ne $hostBase + $added) {
-            $why += "host counted $latchCount in the join's bag before saving, want $($hostBase + $added) - the live sync never delivered the bagged items, so no save could carry them"
+            if ($Race) {
+                Write-Host "    FINDING: host counted $latchCount (want $($hostBase + $added)) when it saved - the edit had not arrived yet"
+            } else {
+                $why += "host counted $latchCount in the join's bag before saving, want $($hostBase + $added) - the live sync never delivered the bagged items, so no save could carry them"
+            }
         }
     }
 
@@ -878,8 +887,8 @@ function Test-BagPersist {
     $detail = $why -join "; "
     $hp = if ($posts.ContainsKey('host')) { $posts['host'] } else { -1 }
     $jp = if ($posts.ContainsKey('join')) { $posts['join'] } else { -1 }
-    Write-Host "  BAG-PERSIST $v - added=$added hostLatch=$latchCount hostPost=$hp joinPost=$jp $detail"
-    return (Add-GateResult -Name "bag_persist" -Status $v `
+    Write-Host "  BAG-PERSIST$(if ($Race) { '-RACE' }) $v - added=$added hostLatch=$latchCount hostPost=$hp joinPost=$jp $detail"
+    return (Add-GateResult -Name $gateName -Status $v `
                 -Metrics @{ added = $added; hostLatch = $latchCount; hostPost = $hp; joinPost = $jp } -Detail $detail)
 }
 
