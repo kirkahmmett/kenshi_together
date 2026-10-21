@@ -768,9 +768,15 @@ public:
                             (!ctx.isHost || (giveDone_ && selfDone_));
             bool blockOk = true, selfOk = true, conserveOk = true;
             if (ctx.isHost) {
-                blockOk = (giveMoved_ == 0);                     // cross-owner drag refused
+                // Refused = nothing crossed. The helper's return value cannot say
+                // it: the veto puts the item back and reports the add as handled
+                // (so a real drag clears the cursor), which reads as "moved".
+                // This gate once passed only because the helper LOST partial
+                // takes (moved=0 with the unit gone).
+                blockOk = false;
                 if (r0AfterGive_ >= 0 && r1AfterGive_ >= 0 && r0BeforeGive_ >= 0)
-                    conserveOk = (r0AfterGive_ == r0BeforeGive_) && (r1AfterGive_ == r1BeforeGive_);
+                    conserveOk = blockOk =
+                        (r0AfterGive_ == r0BeforeGive_) && (r1AfterGive_ == r1BeforeGive_);
                 selfOk = !haveSelfDst_ || (selfMoved_ >= 1);     // same-owner drag still works
             }
             char m[220];

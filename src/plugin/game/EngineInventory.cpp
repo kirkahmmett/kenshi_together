@@ -1307,10 +1307,17 @@ int moveItemBetweenContainers(GameWorld* gw, const unsigned int srcHand[5],
                 if (strcmp(cur[i].stringID, sid) != 0) continue;
                 int have = cur[i].quantity; if (have < 1) have = 1;
                 int take = qty - moved; if (take > have) take = have;
-                Item* taken = src->removeItemDontDestroy_returnsItem(curItems[i], take, false); // virtual
+                // A PARTIAL take must ask for the split-off part back
+                // (returnCopyIfSomeLeft): without it the engine returns no item and
+                // the taken units are simply gone from src. The detached item
+                // carries its own quantity, and tryAddItem treats its quantity
+                // argument as EXTRA units on top of the first (measured: a detached
+                // stack of 3 added with 3 landed as 5, with 1 as 3) - so add with 1.
+                bool partial = take < have;
+                Item* taken = src->removeItemDontDestroy_returnsItem(curItems[i], take, partial); // virtual
                 if (!taken) continue;
-                if (!dst->tryAddItem(taken, take)) {          // virtual: real-object relocation
-                    src->tryAddItem(taken, take);             // destination refused - put it back
+                if (!dst->tryAddItem(taken, 1)) {             // virtual: real-object relocation
+                    src->tryAddItem(taken, 1);                // destination refused - put it back
                     g_invVetoSuspend = vetoSav;
                     return moved;
                 }
