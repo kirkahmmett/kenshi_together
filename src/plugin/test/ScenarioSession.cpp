@@ -1338,6 +1338,195 @@ private:
 };
 const char* const MoneyPersistScenario::SAVE_NAME = "coopresume";
 
+// bag_persist (issue #77, full tier; loadSync + saveSync ON): items the JOIN puts
+// in its OWN worn backpack must survive the host's save. Players report the bag
+// coming back empty after the host reloads, "even if dropped before logging
+// out" - so this asks the settled case first: the join bags its items at 8 s and
+// the host does not save until 30 s, far past every inventory settle window. A
+// FAIL here is the persistence bug itself, not the save-during-settle race.
+//   * join t=8s:  add ADD_QTY of the common probe item to its tab leader's bag.
+//   * host t=30s: latch what IT counts in that bag (proves the edit reached the
+//                 authority), coordinated save, wait for the join's ACK, load.
+//   * both:       after the swap, count again; each side must read base + ADD_QTY.
+// Everything is a delta against each side's own pre-add count (the probe item
+// may already be in the fixture's bag). Fixture: squad2, whose two tab leaders
+// both wear backpacks.
+class BagPersistScenario : public TimedScenario {
+public:
+    BagPersistScenario()
+        : TimedScenario("bag_persist", /*evidenceMs=*/1000),
+          have_(false), type_(0), base_(-1), added_(0), latched_(false),
+          latchCount_(-1), saveIssued_(false), saveOk_(false), ackSeen_(false),
+          ackOk_(false), loadIssued_(false), loadOk_(false), sigWas2_(false),
+          swapDone_(false), checked_(false), postOk_(false), postCount_(-1),
+          dropStartMs_(0), sigClearedMs_(0), checkAtMs_(0) {
+        sid_[0] = '\0';
+        for (int i = 0; i < 5; ++i) hand_[i] = 0;
+    }
+
+    virtual void onStart(const ScenarioContext& ctx) {
+        engine::commonTestItemSid(ctx.gw, sid_, sizeof(sid_), &type_);
+        have_ = resolveBagLeader(ctx.gw) && sid_[0];
+        base_ = have_ ? engine::countInNestedContainer(ctx.gw, hand_, sid_, type_, 0) : -1;
+        char b[224];
+        _snprintf(b, sizeof(b) - 1,
+                  "SCENARIO BPSTART host=%d have=%d hand=%u,%u,%u,%u,%u sid='%s' base=%d",
+                  ctx.isHost ? 1 : 0, have_ ? 1 : 0, hand_[0], hand_[1], hand_[2],
+                  hand_[3], hand_[4], sid_[0] ? sid_ : "(none)", base_);
+        b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    }
+
+    virtual bool onTick(const ScenarioContext& ctx) {
+        bool live = engine::gameplayLive(ctx.gw);
+
+        if (evidenceDue(ctx.elapsedMs) && have_ && live && !swapDone_ && dropStartMs_ == 0) {
+            int n = engine::countInNestedContainer(ctx.gw, hand_, sid_, type_, 0);
+            char b[112];
+            _snprintf(b, sizeof(b) - 1, "SCENARIO BPCOUNT n=%d who=%s t=%lu",
+                      n, ctx.isHost ? "host" : "join", ctx.elapsedMs);
+            b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+        }
+
+        // ---- Join: bag the items (the edit players lose) --------------------
+        if (!ctx.isHost && have_ && added_ == 0 && ctx.elapsedMs >= ADD_AT_MS) {
+            added_ = engine::addItemToNestedContainer(ctx.gw, hand_, sid_, type_, ADD_QTY, 0);
+            if (added_ == 0) added_ = -1; // tried and failed: do not retry every tick
+            char b[128];
+            _snprintf(b, sizeof(b) - 1, "SCENARIO BPADD added=%d want=%d t=%lu",
+                      added_, ADD_QTY, ctx.elapsedMs);
+            b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+        }
+
+        // ---- Host: latch, then save + load ---------------------------------
+        if (ctx.isHost) {
+            if (!latched_ && have_ && live && ctx.elapsedMs >= LATCH_AFTER_MS) {
+                latched_ = true;
+                latchCount_ = engine::countInNestedContainer(ctx.gw, hand_, sid_, type_, 0);
+                char b[128];
+                _snprintf(b, sizeof(b) - 1, "SCENARIO BPLATCH count=%d base=%d t=%lu",
+                          latchCount_, base_, ctx.elapsedMs);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+            if (latched_ && !saveIssued_ && live) {
+                saveIssued_ = true;
+                saveOk_ = engine::saveGameAs(SAVE_NAME);
+                char b[112];
+                _snprintf(b, sizeof(b) - 1, "SCENARIO BPSAVE name='%s' ok=%d t=%lu",
+                          SAVE_NAME, saveOk_ ? 1 : 0, ctx.elapsedMs);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+            if (saveIssued_ && !ackSeen_ && savexfer::lastAckXferId() != 0) {
+                ackSeen_ = true;
+                ackOk_ = (savexfer::lastAckOk() == 1);
+                char b[96];
+                _snprintf(b, sizeof(b) - 1, "SCENARIO BPACK ok=%d t=%lu",
+                          ackOk_ ? 1 : 0, ctx.elapsedMs);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+            if (ackSeen_ && ackOk_ && !loadIssued_ && live) {
+                loadIssued_ = true;
+                loadOk_ = engine::loadSave(SAVE_NAME);
+                char b[112];
+                _snprintf(b, sizeof(b) - 1, "SCENARIO BPLOAD name='%s' ok=%d t=%lu",
+                          SAVE_NAME, loadOk_ ? 1 : 0, ctx.elapsedMs);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+        }
+
+        // ---- Both: world-swap detection (as money_persist) -------------------
+        if (!live && dropStartMs_ == 0) {
+            dropStartMs_ = ctx.elapsedMs;
+        } else if (live && dropStartMs_ != 0) {
+            unsigned long ms = ctx.elapsedMs - dropStartMs_;
+            dropStartMs_ = 0;
+            if (ms >= SWAP_MIN_MS && !swapDone_) {
+                swapDone_ = true;
+                checkAtMs_ = ctx.elapsedMs + SETTLE_MS;
+                char b[112];
+                _snprintf(b, sizeof(b) - 1, "SCENARIO BPSWAPDONE swapMs=%lu t=%lu",
+                          ms, ctx.elapsedMs);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+        }
+        {
+            int sig = engine::saveMgrSignal(0);
+            if (sig == 2) { sigWas2_ = true; sigClearedMs_ = 0; }
+            else if (sigWas2_ && sigClearedMs_ == 0) sigClearedMs_ = ctx.elapsedMs;
+            if (!swapDone_ && sigWas2_ && sigClearedMs_ != 0 && live &&
+                dropStartMs_ == 0 && ctx.elapsedMs >= sigClearedMs_ + SYNC_CONFIRM_MS) {
+                swapDone_ = true;
+                checkAtMs_ = ctx.elapsedMs + SETTLE_MS;
+                coop::logLine("SCENARIO BPSWAPDONE (synchronous inside execute)");
+            }
+        }
+
+        // ---- Both: is the bag still full after the reload? -------------------
+        // The world was rebuilt, so re-resolve the leader (a save-stable hand,
+        // but the pointer behind it is new) before counting.
+        if (swapDone_ && !checked_ && live && ctx.elapsedMs >= checkAtMs_) {
+            checked_ = true;
+            bool again = resolveBagLeader(ctx.gw);
+            postCount_ = again ? engine::countInNestedContainer(ctx.gw, hand_, sid_, type_, 0) : -1;
+            int want = (base_ >= 0) ? base_ + ADD_QTY : -1;
+            postOk_ = (want >= 0) && (postCount_ == want);
+            char b[176];
+            _snprintf(b, sizeof(b) - 1,
+                      "SCENARIO BPPOST count=%d want=%d base=%d ok=%d who=%s t=%lu",
+                      postCount_, want, base_, postOk_ ? 1 : 0,
+                      ctx.isHost ? "host" : "join", ctx.elapsedMs);
+            b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+        }
+
+        bool localDone = ctx.isHost ? (saveOk_ && ackOk_ && loadOk_ && checked_)
+                                    : (added_ != 0 && checked_);
+        if ((localDone && ctx.elapsedMs >= checkAtMs_ + TAIL_HOLD_MS) ||
+            ctx.elapsedMs >= DURATION_MS) {
+            bool reached = (latchCount_ >= 0 && base_ >= 0 && latchCount_ == base_ + ADD_QTY);
+            passed_ = ctx.isHost
+                ? (have_ && reached && saveOk_ && ackOk_ && loadOk_ && swapDone_ && postOk_)
+                : (have_ && added_ == ADD_QTY && swapDone_ && postOk_);
+            return true;
+        }
+        return false;
+    }
+
+private:
+    static const int           ADD_QTY          = 3;
+    static const unsigned long ADD_AT_MS        = 8000;
+    static const unsigned long LATCH_AFTER_MS   = 30000;
+    static const unsigned long SWAP_MIN_MS      = 400;
+    static const unsigned long SYNC_CONFIRM_MS  = 3000;
+    static const unsigned long SETTLE_MS        = 5000;
+    static const unsigned long TAIL_HOLD_MS     = 8000;
+    static const unsigned long DURATION_MS      = 120000;
+
+    // The JOIN's tab leader (rank 1) - the bag whose contents players lose.
+    // Both clients load the same save, so both resolve the same character.
+    bool resolveBagLeader(GameWorld* gw) {
+        EntityState sq[32];
+        unsigned int n = engine::captureSquad(gw, /*leaderOnly*/ false, sq, 32);
+        int li = tabLeaderIdx(sq, n, 1);
+        if (li < 0) return false;
+        handFromEntity(sq[li], hand_);
+        return engine::nestedContainerCount(gw, hand_) >= 1;
+    }
+
+    bool          have_;
+    unsigned int  type_;
+    int           base_, added_;
+    bool          latched_;
+    int           latchCount_;
+    bool          saveIssued_, saveOk_, ackSeen_, ackOk_;
+    bool          loadIssued_, loadOk_, sigWas2_, swapDone_, checked_, postOk_;
+    int           postCount_;
+    unsigned long dropStartMs_, sigClearedMs_, checkAtMs_;
+    unsigned int  hand_[5];
+    char          sid_[48];
+
+    static const char* const SAVE_NAME;
+};
+const char* const BagPersistScenario::SAVE_NAME = "coopresume";
+
 } // namespace
 
 Scenario* makeSessionScenario(const std::string& name) {
@@ -1350,6 +1539,7 @@ Scenario* makeSessionScenario(const std::string& name) {
     if (name == "load_probe")     return new LoadProbeScenario();
     if (name == "load_sync")      return new LoadSyncScenario();
     if (name == "money_persist")  return new MoneyPersistScenario();
+    if (name == "bag_persist")    return new BagPersistScenario();
     return 0;
 }
 

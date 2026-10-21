@@ -1483,6 +1483,22 @@
             Tier = 'full'; WanVariant = $false
         }
 
+        # bag_persist (issue #77): items the JOIN bags in its own worn backpack
+        # must survive the host's save + reload. The join bags at 8 s, the host
+        # saves at 30 s (well past every settle window), then loads; both sides
+        # must count the items afterwards. squad2: both tab leaders wear bags.
+        bag_persist = @{
+            # The harness runs every channel OFF unless a scenario switches it on:
+            # without INV_SYNC the bag edit never leaves the join and the gate
+            # "reproduces" #77 for the wrong reason.
+            DiagEnv = @{ KENSHICOOP_INV_SYNC = '1' }
+            Save = 'squad2'; Setup = ''; Tolerance = 6.0
+            PrimaryGate = 'bag_persist'
+            Gating   = @('bag_persist')
+            Advisory = @('smoothness', 'anim_truth', 'march', 'clock_sync')
+            Tier = 'full'; WanVariant = $false
+        }
+
         # bootstrap_stream: the missing-save "seamless join" proof (protocol
         # 31/32). NOT a run_test tier member and NOT run_test-drivable - it needs
         # the join-from-MENU launch (join has NO save, goes ONLINE, host bakes +

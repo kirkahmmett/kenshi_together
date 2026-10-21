@@ -817,3 +817,69 @@ function Test-MoneyPersist {
                 -Metrics @{ expect = $expect; hostPost = $hostPost; joinPost = $joinPost } -Detail $detail)
 }
 
+# bag_persist (issue #77): do items the JOIN put in its own worn backpack survive
+# the host's save + reload? The join bags ADD_QTY at 8 s; the host saves at 30 s,
+# well past every settle window. Each failure line names which leg broke, so a
+# FAIL tells "never reached the host" apart from "reached it, lost in the save".
+function Test-BagPersist {
+    param([string]$HostFile, [string]$JoinFile)
+    $why = @()
+
+    foreach ($side in @(@($HostFile, 'host'), @($JoinFile, 'join'))) {
+        $s = Select-String -Path $side[0] -Pattern 'SCENARIO BPSTART host=\d have=(\d)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+        if ($null -eq $s) { $why += "$($side[1]) never logged BPSTART" }
+        elseif ($s.Matches[0].Groups[1].Value -ne '1') { $why += "$($side[1]) found no join tab leader wearing a bag (fixture must be squad2)" }
+    }
+
+    $add = Select-String -Path $JoinFile -Pattern 'SCENARIO BPADD added=(-?\d+) want=(\d+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+    $added = -1
+    if ($null -eq $add) { $why += "join never bagged its items (no BPADD)" }
+    else {
+        $added = [int]$add.Matches[0].Groups[1].Value
+        if ($added -ne [int]$add.Matches[0].Groups[2].Value) { $why += "join added $added of $($add.Matches[0].Groups[2].Value) - nothing to persist" }
+    }
+
+    $hostBase = -1
+    $hs = Select-String -Path $HostFile -Pattern 'SCENARIO BPSTART host=1 have=\d .* base=(-?\d+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+    if ($hs) { $hostBase = [int]$hs.Matches[0].Groups[1].Value }
+    $latch = Select-String -Path $HostFile -Pattern 'SCENARIO BPLATCH count=(-?\d+) base=(-?\d+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+    $latchCount = -1
+    if ($null -eq $latch) { $why += "host never latched its pre-save count (BPLATCH)" }
+    else {
+        $latchCount = [int]$latch.Matches[0].Groups[1].Value
+        if ($added -gt 0 -and $latchCount -ne $hostBase + $added) {
+            $why += "host counted $latchCount in the join's bag before saving, want $($hostBase + $added) - the live sync never delivered the bagged items, so no save could carry them"
+        }
+    }
+
+    foreach ($leg in @(@('BPSAVE', 'coordinated save'), @('BPACK', 'join save-commit ACK'), @('BPLOAD', 'mid-session load'))) {
+        $m = Select-String -Path $HostFile -Pattern "SCENARIO $($leg[0]) .*ok=(\d)" -ErrorAction SilentlyContinue | Select-Object -Last 1
+        if ($null -eq $m) { $why += "host never logged its $($leg[1]) ($($leg[0]))" }
+        elseif ($m.Matches[0].Groups[1].Value -ne '1') { $why += "host $($leg[1]) failed" }
+    }
+
+    $posts = @{}
+    foreach ($side in @(@($HostFile, 'host'), @($JoinFile, 'join'))) {
+        $file = $side[0]; $tag = $side[1]
+        if ($null -eq (Select-String -Path $file -Pattern 'SCENARIO BPSWAPDONE' -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+            $why += "$tag never completed its world swap (no BPSWAPDONE)"
+        }
+        $p = Select-String -Path $file -Pattern 'SCENARIO BPPOST count=(-?\d+) want=(-?\d+) base=(-?\d+) ok=(\d)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+        if ($null -eq $p) { $why += "$tag never logged its post-load BPPOST"; continue }
+        $g = $p.Matches[0].Groups
+        $posts[$tag] = [int]$g[1].Value
+        if ($g[4].Value -ne '1') {
+            $tail = if ([int]$g[1].Value -eq [int]$g[3].Value) { " - the bag came back as it was before the join's edit (issue #77)" } else { "" }
+            $why += "$tag counted $($g[1].Value) in the bag after reload, want $($g[2].Value)$tail"
+        }
+    }
+
+    $v = if ($why.Count -eq 0) { "PASS" } else { "FAIL" }
+    $detail = $why -join "; "
+    $hp = if ($posts.ContainsKey('host')) { $posts['host'] } else { -1 }
+    $jp = if ($posts.ContainsKey('join')) { $posts['join'] } else { -1 }
+    Write-Host "  BAG-PERSIST $v - added=$added hostLatch=$latchCount hostPost=$hp joinPost=$jp $detail"
+    return (Add-GateResult -Name "bag_persist" -Status $v `
+                -Metrics @{ added = $added; hostLatch = $latchCount; hostPost = $hp; joinPost = $jp } -Detail $detail)
+}
+
