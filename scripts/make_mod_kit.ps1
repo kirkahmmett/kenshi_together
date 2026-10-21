@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-  Package the PLAYER release: a single folder called "KenshiCoop" with the mod
-  files inside, that a player copies straight into <Kenshi>\mods\. No install
-  scripts, no launchers, no bundled save.
+  Package the PLAYER release: a folder called "KenshiCoop" with the mod files
+  inside, plus a one-click installer that puts it (and RE_Kenshi) in place. The
+  folder can still be copied into <Kenshi>\mods\ by hand. No bundled save.
 
 .DESCRIPTION
   Assembles dist\mod-kit\ as:
@@ -13,8 +13,9 @@
       RE_Kenshi.json              tells RE_Kenshi to load the plugin
       coop_config.json            only needed for LAN/direct-UDP; Steam play is
                                   configured entirely in-game (F2)
-    README.txt                  <- plain copy-the-folder instructions (NOT copied
-                                  into mods, so it never clutters the game folder)
+    KenshiCoop-Setup.cmd/.ps1   <- one-click installer / uninstaller (scripts\installer)
+    README.txt                  <- install + play instructions (NOT copied into
+                                  mods, so it never clutters the game folder)
   ...then zips it to dist\KenshiCoop-kit.zip (the release artifact the README
   and the GitHub release point at).
 
@@ -100,34 +101,47 @@ Copy-Item $mod  (Join-Path $modDir "KenshiCoop.mod")
 }
 '@ | Set-Content (Join-Path $modDir "coop_config.json") -Encoding UTF8
 
+# One-click installer (scripts\installer): finds Kenshi, installs RE_Kenshi (and
+# the 1.0.65 executable it runs on a 1.0.68 install), installs + enables the mod,
+# and uninstalls. It sits at the kit root and installs the KenshiCoop folder
+# next to it.
+$installerDir = Join-Path $scriptDir "installer"
+foreach ($f in "KenshiCoop-Setup.cmd", "KenshiCoop-Setup.ps1") {
+    Copy-Item (Join-Path $installerDir $f) (Join-Path $kitDir $f)
+}
+
 # Top-level README (sibling to the KenshiCoop folder, so it is NOT copied into
-# the game). Plain "copy the folder" instructions - no install script.
+# the game).
 @'
 KenshiCoop - co-op mod
 ======================
 
-This zip contains ONE folder: "KenshiCoop". That folder IS the mod.
-
 INSTALL (both players)
 ----------------------
   1. Right-click the downloaded zip > Properties > Unblock (if shown), then
-     extract it.
-  2. Copy the "KenshiCoop" folder into your Kenshi mods folder:
-       <Kenshi>\mods\
-     so you end up with:
-       <Kenshi>\mods\KenshiCoop\KenshiCoop.dll   (and the other files)
-     The default Steam path is:
-       C:\Program Files (x86)\Steam\steamapps\common\Kenshi\mods\
-  3. Launch Kenshi and enable "KenshiCoop" in the Mods menu.
+     extract it anywhere.
+  2. Close Kenshi, then double-click KenshiCoop-Setup.cmd.
+     It finds your Kenshi, installs RE_Kenshi (the free loader the co-op plugin
+     needs; downloaded from github.com/BFrizzleFoShizzle/RE_Kenshi and checked
+     against a fixed SHA-256), installs the KenshiCoop mod and enables it.
+     On Kenshi 1.0.68 it also creates the 1.0.65 game executable RE_Kenshi
+     runs on - your own 1.0.68 executable is not modified.
+  3. Start Kenshi normally. The main menu should read "RE_Kenshi 0.3.5".
+
+  Kenshi somewhere other than a Steam library? Run it from a command prompt:
+     KenshiCoop-Setup.cmd -KenshiDir "D:\Games\Kenshi"
+
+  Manual install (if you prefer): install RE_Kenshi 0.3.1+ yourself
+  (https://www.nexusmods.com/kenshi/mods/847), copy the "KenshiCoop" folder into
+  <Kenshi>\mods\ and enable "KenshiCoop" in Kenshi's Mods menu.
 
 PREREQUISITES (both players)
 ----------------------------
-  1. Kenshi 1.0.65 (Steam).
-  2. RE_Kenshi 0.3.1+ (free mod that loads the plugin):
-     https://www.nexusmods.com/kenshi/mods/847
-  3. For the Steam transport (recommended): Steam RUNNING and ONLINE on both
+  1. Kenshi 1.0.65 or 1.0.68 (Steam or GOG).
+  2. For the Steam transport (recommended): Steam RUNNING and ONLINE on both
      machines. No port forwarding, no IPs, no config editing - you swap Steam
      IDs in-game (see PLAY below).
+  3. Both players need the SAME KenshiCoop release and the same enabled mods.
 
 PLAY (Steam - recommended)
 --------------------------
@@ -159,7 +173,10 @@ PLAY (LAN / direct UDP - advanced)
 
 UNINSTALL
 ---------
-  Delete <Kenshi>\mods\KenshiCoop. Nothing else is touched.
+  KenshiCoop-Setup.cmd -Uninstall                  removes the mod
+  KenshiCoop-Setup.cmd -Uninstall -RemoveReKenshi  also removes RE_Kenshi, if the
+                                                   installer put it there
+  The installer kept a backup of every file it edited (*.kenshicoop.bak).
 
 TROUBLESHOOTING
 ---------------
@@ -193,7 +210,8 @@ $proto = if ($protoLine) { $protoLine.Matches[0].Groups[1].Value } else { "?" }
 } | ConvertTo-Json | Set-Content (Join-Path $kitDir "PROVENANCE.json") -Encoding UTF8
 Write-Host "Packaged DLL SHA-256 verified == canonical."
 
-# Zip: the archive contains the KenshiCoop\ folder + README.txt + PROVENANCE.json.
+# Zip: the archive contains the KenshiCoop\ folder, the installer, README.txt and
+# PROVENANCE.json.
 $zip = Join-Path $repoRoot "dist\KenshiCoop-kit.zip"
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path (Join-Path $kitDir "*") -DestinationPath $zip
