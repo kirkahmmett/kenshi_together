@@ -11,7 +11,19 @@
 #   2. launches the loader (default: the Steam install's kenshi_x64.exe),
 #   3. waits for a NEW Kenshi_x64 window that has an "OK" button,
 #   4. clicks OK via BM_CLICK (cross-process; no screen coordinates needed),
-#   5. returns the real game's process Id (written to stdout as "GAMEPID=<id>").
+#   5. dismisses Kenshi's "Mods warning" box if the click raises one,
+#   6. returns the real game's process Id (written to stdout as "GAMEPID=<id>").
+#
+# The click is POSTED, not sent: BM_CLICK runs the launcher's OK handler, and when
+# that handler opens a modal box a SendMessage never returns - the 2026-10-21 runs
+# hung for 14 minutes on exactly that, past every timeout in this script.
+#
+# "Mods warning" ("One or more mods are missing or in incorrect order. Continue
+# anyway?") was seen once, on the join copy's FIRST launch while the host ran, on
+# a Steam account subscribed to 46 Workshop mods (data\__mods.list names them all).
+# It did not reappear on that copy's later launches, alone or beside the host, so
+# the trigger is not pinned down. Only mods listed in data\mods.cfg load, so
+# answering Yes changes nothing the test depends on; it is logged when it happens.
 #
 # Env vars (KENSHICOOP_*) must be set by the caller before invoking; they are
 # inherited by the launched process and propagate to the relaunched game.
@@ -33,9 +45,33 @@ public static class KenLauncher {
   [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h, EnumProc cb, IntPtr p);
   [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
-  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr p);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h, int id);
   public delegate bool EnumProc(IntPtr h, IntPtr p);
   public const uint BM_CLICK = 0x00F5;
+  public const int  IDYES    = 6;
+  // A visible top-level dialog of process pid whose title is exactly 'title'.
+  public static IntPtr FindDialog(uint pid, string title) {
+    IntPtr hit = IntPtr.Zero;
+    EnumWindows((h,p) => {
+      uint owner; GetWindowThreadProcessId(h, out owner);
+      if (owner != pid || !IsWindowVisible(h)) return true;
+      var c = new StringBuilder(64); GetClassName(h, c, 64);
+      var t = new StringBuilder(128); GetWindowText(h, t, 128);
+      if (c.ToString() == "#32770" && t.ToString() == title) { hit = h; return false; }
+      return true;
+    }, IntPtr.Zero);
+    return hit;
+  }
+  // Press Yes by control id, so a localized "&Evet"/"&Ja" button still matches.
+  public static bool PressYes(IntPtr dlg) {
+    IntPtr b = GetDlgItem(dlg, IDYES);
+    if (b == IntPtr.Zero) return false;
+    return PostMessage(b, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
+  }
   static IntPtr found;
   public static IntPtr FindButton(IntPtr top, string text) {
     found = IntPtr.Zero;
@@ -52,8 +88,7 @@ public static class KenLauncher {
   public static bool ClickButton(IntPtr top, string text) {
     IntPtr b = FindButton(top, text);
     if (b == IntPtr.Zero) return false;
-    SendMessage(b, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
-    return true;
+    return PostMessage(b, BM_CLICK, IntPtr.Zero, IntPtr.Zero);
   }
 }
 "@
@@ -81,6 +116,23 @@ if (-not $game) { Write-Error "Timed out waiting for the Kenshi launcher (OK but
 Write-Host ("Launcher up: PID=" + $game.Id + " '" + $game.MainWindowTitle + "' - clicking OK")
 if (-not [KenLauncher]::ClickButton($game.MainWindowHandle, "OK")) {
     Write-Error "Found launcher window but failed to click OK."; exit 3
+}
+
+# The OK handler may raise "Mods warning" (see header). Watch briefly; the game
+# leaves the launcher within a second or two when no box appears.
+$warnDeadline = (Get-Date).AddSeconds(15)
+while ((Get-Date) -lt $warnDeadline) {
+    Start-Sleep -Milliseconds 250
+    if ($game.HasExited) { break }
+    $dlg = [KenLauncher]::FindDialog([uint32]$game.Id, "Mods warning")
+    if ($dlg -ne [IntPtr]::Zero) {
+        if ([KenLauncher]::PressYes($dlg)) {
+            Write-Host "Dismissed Kenshi 'Mods warning' (Workshop mods not visible to this instance) - continuing"
+        } else {
+            Write-Error "Kenshi 'Mods warning' is up and its Yes button was not found."; exit 4
+        }
+        break
+    }
 }
 
 # Emit on the output stream (not Write-Host) so callers can capture it.
