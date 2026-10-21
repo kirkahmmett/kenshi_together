@@ -31,6 +31,7 @@
 #include "core/CrashDump.h"
 #include "core/OwnRanks.h"
 #include "core/Inbound.h"
+#include "core/TickProfiler.h"
 #include "net/NetLink.h"
 #include "net/SteamP2P.h"
 #include "net/SteamInvite.h"
@@ -213,6 +214,41 @@ void coopUiDisconnect();
 // and the engine's kenshi.log (handy when attached live).
 void coopLog(const char* msg) { coop::logLine(msg);    DebugLog(msg); }
 void coopErr(const char* msg) { coop::logErrLine(msg); ErrorLog(msg); }
+
+// Per-section main-loop cost (core/TickProfiler.h): one "[perf]" line per
+// KENSHICOOP_PERF_MS window (default 10 s, 0 = off). KC_PERF times one statement
+// with the performance counter; it holds no C++ objects, so it is safe inside
+// the SEH-guarded tick functions too.
+coop::perf::TickProfiler g_perf;
+unsigned long            g_perfWindowMs = 0;   // set in startPlugin
+unsigned __int64         g_perfFreq     = 0;
+
+inline unsigned __int64 perfNow() {
+    LARGE_INTEGER c;
+    QueryPerformanceCounter(&c);
+    return (unsigned __int64)c.QuadPart;
+}
+
+#define KC_PERF(sec, stmt) do { \
+    if (g_perfWindowMs) { \
+        unsigned __int64 kcPerfT0_ = perfNow(); \
+        stmt; \
+        g_perf.add(coop::perf::sec, perfNow() - kcPerfT0_); \
+    } else { stmt; } \
+} while (0)
+
+// End-of-hook: close the tick and, once per window, log the line and restart.
+void perfEndTick(unsigned __int64 hookT0) {
+    if (!g_perfWindowMs) return;
+    g_perf.add(coop::perf::S_HOOK, perfNow() - hookT0);
+    g_perf.endTick();
+    if (g_perf.windowDue(GetTickCount(), g_perfWindowMs)) {
+        char line[512];
+        g_perf.format(line, sizeof(line), g_perfFreq, g_perfWindowMs, 8);
+        coopLog(line);
+        g_perf.reset();
+    }
+}
 
 // Blank-portraits diagnostic (protocol 36): loading a save folder without its
 // portrait atlas blanks the squad-tab avatars until the next portrait rebuild.
@@ -1059,17 +1095,17 @@ static coop::SyncContext replCtx(GameWorld* gw) {
 // caller (see the comment there); every channel is gated by its own Config knob.
 void tickReplicatePublish(GameWorld* gw, bool worldLive) {
     if (worldLive) {
-        g_repl.ingest(g_inbound);
+        KC_PERF(S_PUB_INGEST, g_repl.ingest(g_inbound));
         // Phase 4a: drain received container-contents snapshots into the per-container
         // cache (reconciled after the engine tick by applyInventories).
-        g_repl.ingestInv(g_inbound);
+        KC_PERF(S_PUB_INGEST, g_repl.ingestInv(g_inbound));
         // Both clients latch reliable transition events (KO/death/revive) for the bodies
         // they drive, before apply (a side can emit an event for its own owned body and
         // the peer that drives that body must honour it).
-        g_repl.applyEvents(gw, g_inbound);
+        KC_PERF(S_PUB_INGEST, g_repl.applyEvents(gw, g_inbound));
     }
     if (worldLive) {
-        g_repl.publishOwned(gw, g_net, g_net.localId());
+        KC_PERF(S_PUB_OWNED, g_repl.publishOwned(gw, g_net, g_net.localId()));
         // Phase W2: BOTH clients watch their OWNED characters for a WEAPON drop and author a
         // reliable conservation intent so the peer relocates its own copy of that weapon (a
         // weapon can't be rebuilt via the W1 proxy path). Bidirectional; gated on worldSync.
@@ -1079,7 +1115,7 @@ void tickReplicatePublish(GameWorld* gw, bool worldLive) {
         // can be authored ahead of the intent that explains it, and the peer's reconcile
         // destroys the copy the intent was going to relocate.
         if (g_cfg.worldSync)
-            g_repl.detectAndPublishWeaponDrops(gw, g_net, g_net.localId());
+            KC_PERF(S_PUB_WEAPONS, g_repl.detectAndPublishWeaponDrops(gw, g_net, g_net.localId()));
         // Phase W3 convergence: prune ground-gear tracks whose object is gone (a stale
         // Item* is how a re-home silently no-ops, leaving the author's copy on the ground
         // as a duplicate) and finish any re-home the peer's pickup could not complete yet.
@@ -1087,13 +1123,13 @@ void tickReplicatePublish(GameWorld* gw, bool worldLive) {
         // snapshot; it only ever touches PEER-owned containers, so it cannot feed the
         // owned-character census above and loop.
         if (g_cfg.worldSync)
-            g_repl.reconcileGroundGear(gw);
+            KC_PERF(S_PUB_WEAPONS, g_repl.reconcileGroundGear(gw));
         // Both clients stream the contents of every squad member they OWN (host tab 0,
         // join tab 1) on content-change - bidirectional, disjoint by the same tab
         // partition as positional sync. Gated on invSync so ordinary co-op sessions add
         // no inventory traffic; the peer reconciles via applyInventories (skips own).
         if (g_cfg.invSync)
-            g_repl.publishInventories(gw, g_net, g_net.localId());
+            KC_PERF(S_PUB_INV, g_repl.publishInventories(gw, g_net, g_net.localId()));
         // Protocol 37: BOTH clients diff every tracked container (own + received)
         // against its baseline to catch a completed cross-owner UI drag - the one
         // inventory write the single-writer snapshots cannot represent - and author
@@ -1104,14 +1140,14 @@ void tickReplicatePublish(GameWorld* gw, bool worldLive) {
         // xferLatch_/xferDefer_ reconcile-race machinery then stays dormant (never
         // populated). KENSHICOOP_BLOCK_XFER=0 restores this replicate-the-trade path.
         if (g_cfg.xferSync)
-            g_repl.detectAndPublishTransfers(gw, g_net, g_net.localId());
+            KC_PERF(S_PUB_XFER, g_repl.detectAndPublishTransfers(gw, g_net, g_net.localId()));
         // Phase W1 (bidirectional): BOTH clients stream the free ground items they
         // author in their interest sphere - owner-scoped netId spaces, peer items
         // filtered by the proxy echo guard - so a join-side drop of materials/food
         // finally appears on the host. Proxies reconcile after the engine tick
         // (applyWorldItems, also both sides now).
         if (g_cfg.worldSync)
-            g_repl.publishWorldItems(gw, g_net, g_net.localId());
+            KC_PERF(S_PUB_WORLD, g_repl.publishWorldItems(gw, g_net, g_net.localId()));
         // Phase 2 (player combat + medical): owner-authoritative vitals sync for
         // player-squad members, both directions. publishMedical streams OUR
         // members' medical model (change-gated, reliable); applyMedical writes
@@ -1120,18 +1156,18 @@ void tickReplicatePublish(GameWorld* gw, bool worldLive) {
         // applyTreatments lands forwarded first aid on the bodies we own.
         // Ordered after publishOwned (they use the ownHands_ set it refreshes).
         if (g_cfg.medSync) {
-            g_repl.publishMedical(gw, g_net, g_net.localId());
-            g_repl.applyMedical(gw, g_inbound, g_net, g_net.localId());
-            g_repl.applyTreatments(gw, g_inbound);
+            KC_PERF(S_MEDICAL, g_repl.publishMedical(gw, g_net, g_net.localId()));
+            KC_PERF(S_MEDICAL, g_repl.applyMedical(gw, g_inbound, g_net, g_net.localId()));
+            KC_PERF(S_MEDICAL, g_repl.applyTreatments(gw, g_inbound));
             // Join-dealt authoritative damage (protocol 45): the JOIN forwards the
             // damage its guarded melee would have dealt to driven world-NPC copies;
             // the HOST applies it to the real body (blood + a frontal flesh wound),
             // which the vitals stream then mirrors back. Decouples the join PC's
             // damage from its disrupted (position-driven) copy animation.
             if (g_cfg.isHost)
-                g_repl.applyCombatHits(gw, g_inbound);
+                KC_PERF(S_MEDICAL, g_repl.applyCombatHits(gw, g_inbound));
             else
-                g_repl.publishCombatHits(gw, g_net, g_net.localId());
+                KC_PERF(S_MEDICAL, g_repl.publishCombatHits(gw, g_net, g_net.localId()));
         }
         // Character stats sync (protocol 17): owner-authoritative CharStats
         // stream for player-squad members, both directions. publishStats
@@ -1139,8 +1175,8 @@ void tickReplicatePublish(GameWorld* gw, bool worldLive) {
         // writes received snapshots onto the peer copies we drive. Ordered
         // after publishOwned (they use the ownHands_ set it refreshes).
         if (g_cfg.statsSync) {
-            g_repl.publishStats(gw, g_net, g_net.localId());
-            g_repl.applyStats(gw, g_inbound);
+            KC_PERF(S_STATS, g_repl.publishStats(gw, g_net, g_net.localId()));
+            KC_PERF(S_STATS, g_repl.applyStats(gw, g_inbound));
         }
         // Shared money pool (protocol 52): Kenshi keeps ONE player wallet, so
         // both players spend from one pool with the host as authority. Publish
@@ -1149,8 +1185,8 @@ void tickReplicatePublish(GameWorld* gw, bool worldLive) {
         // total. Ordered after publishOwned so isHostRole() reflects this tick's
         // ownership partition.
         if (g_cfg.moneySync) {
-            g_repl.publishMoneyPool(replCtx(gw));
-            g_repl.applyMoneyPool(replCtx(gw));
+            KC_PERF(S_MONEY, g_repl.publishMoneyPool(replCtx(gw)));
+            KC_PERF(S_MONEY, g_repl.applyMoneyPool(replCtx(gw)));
         }
         // Recruitment sync (protocol 23): drain the recruit detour's edge queue
         // into reliable EVT_RECRUIT events (subject = old hand, actor = new
@@ -1158,7 +1194,7 @@ void tickReplicatePublish(GameWorld* gw, bool worldLive) {
         // receive half (re-key) lives in applyEvents above. Ordered after
         // publishOwned so this tick's recruits pin BEFORE next tick's census.
     if (g_cfg.recruitSync)
-        g_repl.publishRecruits(gw, g_net, g_net.localId());
+        KC_PERF(S_SQUAD, g_repl.publishRecruits(gw, g_net, g_net.localId()));
 
     // Squad management sync (protocol 35): poll the roster's pointer->hand
     // baseline (~2 Hz; a squad-tab move re-containers the body but the
@@ -1166,7 +1202,7 @@ void tickReplicatePublish(GameWorld* gw, bool worldLive) {
     // pinning moved hands to the mover's ownership. The receive half (shared
     // EVT_RECRUIT re-key path) lives in applyEvents above.
     if (g_cfg.squadSync)
-        g_repl.publishSquadMoves(gw, g_net, g_net.localId());
+        KC_PERF(S_SQUAD, g_repl.publishSquadMoves(gw, g_net, g_net.localId()));
 
     // Change-gated sampled channels (Phase 6c): faction relations (protocol 24),
     // baked doors (26), placed buildings (27), placed-building doors (28),
@@ -1177,7 +1213,7 @@ void tickReplicatePublish(GameWorld* gw, bool worldLive) {
     // and cadence order, so adding a sampled channel is one table row there -
     // not an edit to this tick. Ordered after recruit/squad (ownership pins)
     // and before stealth/speed/time, exactly as the explicit blocks were.
-    g_repl.driveSampledChannels(replCtx(gw));
+    KC_PERF(S_SAMPLED, g_repl.driveSampledChannels(replCtx(gw)));
         // Stealth sync (protocol 20): the HOST is the world-detection authority
         // - it streams each DRIVEN sneaker's whoSeesMeSneaking back to the
         // sneaker's owner; every client replays received snapshots onto the
@@ -1185,15 +1221,15 @@ void tickReplicatePublish(GameWorld* gw, bool worldLive) {
         // posture half lives inside applyTargets (continuous BODY_SNEAK apply).
         if (g_cfg.stealthSync) {
             if (g_cfg.isHost)
-                g_repl.publishStealth(gw, g_net, g_net.localId());
-            g_repl.applyStealthFeedback(gw, g_inbound);
+                KC_PERF(S_STEALTH, g_repl.publishStealth(gw, g_net, g_net.localId()));
+            KC_PERF(S_STEALTH, g_repl.applyStealthFeedback(gw, g_inbound));
         }
         // Consensus game-speed sync: detect local speed clicks as REQUESTS,
         // host arbitrates effective = min(requests) (capped at 1x while either
         // player squad fights) and broadcasts; the join applies the SET. Runs
         // after publishOwned (the combat flag samples the ownHands_ set).
         if (g_cfg.speedSync)
-            g_repl.syncSpeed(gw, g_inbound, g_net, g_net.localId(), g_cfg.isHost);
+            KC_PERF(S_SPEED, g_repl.syncSpeed(gw, g_inbound, g_net, g_net.localId(), g_cfg.isHost));
         // Phase 6 (6a evidence spike): env-gated ([shackledbg]) per-character
         // shackle/lock trace. No-op unless KENSHICOOP_DEBUG_SHACKLE=1, so it is
         // free to leave in the tick for manual-session characterization.
@@ -1204,14 +1240,14 @@ void tickReplicatePublish(GameWorld* gw, bool worldLive) {
         // arbitrated consensus effective. AFTER syncSpeed so a slew change
         // applies against this tick's consensus state.
         if (g_cfg.timeSync)
-            g_repl.syncTime(gw, g_inbound, g_net, g_net.localId(), g_cfg.isHost);
+            KC_PERF(S_TIME, g_repl.syncTime(gw, g_inbound, g_net, g_net.localId(), g_cfg.isHost));
         // Runtime-spawn proxy replication (protocol 21): the join asks about
         // streamed hands it couldn't resolve last tick (host RUNTIME spawns)
         // and mints local proxy bodies from the host's replies; the host
         // answers requests. BEFORE the engine tick so a proxy bound this
         // frame is driven by this frame's applyTargets.
         if (g_cfg.spawnSync)
-            g_repl.syncSpawns(gw, g_inbound, g_net, g_net.localId(), g_cfg.isHost);
+            KC_PERF(S_SPAWN, g_repl.syncSpawns(gw, g_inbound, g_net, g_net.localId(), g_cfg.isHost));
     }
 }
 
@@ -1297,41 +1333,41 @@ void trackMove(GameWorld* gw);   // KENSHICOOP_TRACK_MOVE route recorder (below)
 
 void tickReplicateApply(GameWorld* gw, bool worldLive) {
     if (worldLive && coop::engine::gameplayLive(gw)) {
-        g_repl.applyTargets(gw);
+        KC_PERF(S_APPLY_TARGETS, g_repl.applyTargets(gw));
         // Phase W2: relocate our own copy of any DROPPED weapon to the ground BEFORE the
         // inventory reconcile runs, so the conservation move beats the (debounced) removal
         // reconcile that would otherwise DESTROY the weapon we cannot refabricate.
         if (g_cfg.worldSync) {
-            g_repl.applyWeaponDrops(gw, g_inbound);
+            KC_PERF(S_APPLY_WEAPONS, g_repl.applyWeaponDrops(gw, g_inbound));
             // Phase W3: re-home tracked ground copies into the picking character's bag, also
             // before the inventory reconcile (which can't refabricate a weapon into the proxy).
-            g_repl.applyWeaponPickups(gw, g_inbound);
+            KC_PERF(S_APPLY_WEAPONS, g_repl.applyWeaponPickups(gw, g_inbound));
         }
         // Protocol 37: relocate our copy of any cross-owner TRADED item between the
         // two containers BEFORE the inventory reconcile, so the conservation move
         // beats the stale-snapshot dupe/wipe (and traded gear survives - no
         // fabrication on this path).
         if (g_cfg.xferSync) {
-            g_repl.applyTransfers(gw, g_inbound, g_net, g_net.localId());
+            KC_PERF(S_APPLY_XFER, g_repl.applyTransfers(gw, g_inbound, g_net, g_net.localId()));
             // Protocol 50: settle our own outstanding intents on the receiver's
             // verdict. Before the reconcile, because a rejected transfer works
             // by DROPPING our latch and letting applyInventories restore the
             // owner's version - one tick later and the reconcile would run once
             // more while still defending a move that was refused.
-            g_repl.applyXferAcks(gw, g_inbound, g_net.localId());
+            KC_PERF(S_APPLY_XFER, g_repl.applyXferAcks(gw, g_inbound, g_net.localId()));
         }
         // Phase 4a: reconcile any peer-owned container we received a fresh snapshot
         // for (the join applies the host's container; the host skips its own).
-        g_repl.applyInventories(gw);
+        KC_PERF(S_APPLY_INV, g_repl.applyInventories(gw));
         // Phase W1 (bidirectional): BOTH clients spawn/update/cull local proxies for
         // the peer's streamed ground items, keyed (ownerId, netId) so the per-sender
         // netId spaces never collide.
         if (g_cfg.worldSync) {
-            g_repl.applyWorldItems(gw, g_inbound);
+            KC_PERF(S_APPLY_WORLD, g_repl.applyWorldItems(gw, g_inbound));
             // Protocol 47: a peer consumed a proxy it held for one of OUR ground items,
             // so destroy our real copy. Runs AFTER applyWorldItems so a snapshot and the
             // claim that retires it in the same batch resolve in authored order.
-            g_repl.applyWorldClaims(gw, g_inbound, g_net.localId());
+            KC_PERF(S_APPLY_WORLD, g_repl.applyWorldClaims(gw, g_inbound, g_net.localId()));
         }
         // Host-authoritative world: only the JOIN hides/freezes any local NPC the
         // host isn't streaming (so the join can't run a divergent copy). The host IS
@@ -1344,11 +1380,11 @@ void tickReplicateApply(GameWorld* gw, bool worldLive) {
         // other's. With cellAuth off the two conditions collapse to today's
         // exclusive split, which is what makes the fail-open A/B meaningful.
         if (!g_cfg.isHost || g_cfg.cellAuth) {
-            g_repl.applyNpcCensus(gw, g_inbound);
-            g_repl.enforceHostAuthority(gw, g_net.localId());
+            KC_PERF(S_CENSUS, g_repl.applyNpcCensus(gw, g_inbound));
+            KC_PERF(S_CENSUS, g_repl.enforceHostAuthority(gw, g_net.localId()));
         }
         if (g_cfg.isHost || g_cfg.cellAuth) {
-            g_repl.publishNpcCensus(gw, g_net, g_net.localId());
+            KC_PERF(S_CENSUS, g_repl.publishNpcCensus(gw, g_net, g_net.localId()));
         }
         // Camera-anchored interest (protocol 43): both sides publish their
         // LOCAL camera to the engine's anchor store, ship its center to the
@@ -1356,8 +1392,8 @@ void tickReplicateApply(GameWorld* gw, bool worldLive) {
         // Runs even with CAM_INTEREST off (the engine-side knob makes
         // interestCenters ignore the anchors) so an A/B toggle needs no
         // session restart logic.
-        g_repl.syncCamHint(gw, g_inbound, g_net, g_net.localId());
-        g_repl.syncCellClaims(gw, g_inbound, g_net, g_net.localId());
+        KC_PERF(S_CAM_CELL, g_repl.syncCamHint(gw, g_inbound, g_net, g_net.localId()));
+        KC_PERF(S_CAM_CELL, g_repl.syncCellClaims(gw, g_inbound, g_net, g_net.localId()));
         trackMove(gw);
     }
 }
@@ -1476,6 +1512,7 @@ void tickScenarioTick(GameWorld* gw) {
 }
 
 void mainLoop_hook(GameWorld* gw, float dt) {
+    const unsigned __int64 perfHookT0 = g_perfWindowMs ? perfNow() : 0;
     ++g_tick;
     g_lastGw = gw; // cache for the argument-less F2 UI callbacks
 
@@ -1499,12 +1536,12 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     }
 #endif
 
-    coopPanelDrive();
+    KC_PERF(S_PANEL, coopPanelDrive());
 
     // Protocol 32 world-swap edge detection + session reset. Runs FIRST so the
     // reload edge lands before any sync code touches pointers from the torn-down
     // world this tick.
-    tickWorldSwapEdge(gw);
+    KC_PERF(S_WORLD_SWAP, tickWorldSwapEdge(gw));
 
     if (!g_gameStarted && coop::engine::gameplayLive(gw)) {
         g_gameStarted   = true;
@@ -1603,7 +1640,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
         TerminateProcess(GetCurrentProcess(), 0);
     }
 
-    processNetEvents(gw);
+    KC_PERF(S_NET_EVENTS, processNetEvents(gw));
 
     // Coordinated load (protocol 32): the JOIN never loads locally while a
     // peer is connected under the gate - the host arbitrates; a manual load
@@ -1623,19 +1660,19 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     // Test-scene setup: host spawns the controlled scene ONCE, a few seconds
     // after gameplay starts, then leaves the game running so the user can arrange
     // the pose and SAVE (baking save-stable hands that resolve on both clients).
-    tickSetupScene(gw);
+    KC_PERF(S_HARNESS, tickSetupScene(gw));
 
     // Deferred auto-bake: write the fixture save once the armed settle window
     // elapses (one-shot); the self-exit timer then ends the bake run.
-    tickAutoBake();
+    KC_PERF(S_HARNESS, tickAutoBake());
 
     // Host re-arm + inventory-owner registration: keep craft/down scenes on task
     // across save/load drift and (re)resolve the owned container for invSync.
-    tickHostRearm(gw);
+    KC_PERF(S_HARNESS, tickHostRearm(gw));
 
     // Scenario completion hold: once a verdict is logged, keep driving the synced
     // bodies on screen for the capture window, then self-exit cleanly. (harness)
-    tickScenarioHold();
+    KC_PERF(S_HARNESS, tickScenarioHold());
 
     // Coordinated load (protocol 32): while a world swap is in progress the
     // OLD world is being torn down under us - every cached Character*/
@@ -1659,31 +1696,33 @@ void mainLoop_hook(GameWorld* gw, float dt) {
 
     // Replication publish (pre-engine, worldLive-gated): ingest received targets,
     // then stream every owned channel so applied state is current this tick.
-    tickReplicatePublish(gw, worldLive);
+    tickReplicatePublish(gw, worldLive); // sections timed inside
 
     // Coordinated save + load (protocols 31/32): run under g_gameStarted (NOT
     // worldLive) so they keep pumping DURING a world swap - they only touch net
     // packets, file IO and the load/save ENTRY points, never a cached world ptr.
-    tickCoordinatedSaveLoad(gw);
+    KC_PERF(S_SAVE_LOAD, tickCoordinatedSaveLoad(gw));
 
     // Scenario onStart (harness): pre-arm hold + peer-ready/timeout arm, fired
     // once BEFORE the engine tick so a host-issued order takes effect this frame.
-    tickScenarioStart(gw);
+    KC_PERF(S_HARNESS, tickScenarioStart(gw));
 
-    g_mainLoop_orig(gw, dt); // run the engine (incl. local AI)
+    KC_PERF(S_ENGINE, g_mainLoop_orig(gw, dt)); // run the engine (incl. local AI)
 
     // Replication apply (post-engine): our transform is the last word the renderer
     // samples. Re-checks gameplayLive so a swap STARTED by this engine tick skips
     // apply (its caches are now stale; the reset runs next tick's reload edge).
-    tickReplicateApply(gw, worldLive);
+    tickReplicateApply(gw, worldLive); // sections timed inside
 
     // Coordinated load deferred-signal backstop: if the LOADGAME signal stalls
     // past the grace window, pump SaveManager::execute() once from end-of-tick.
-    tickLoadPumpBackstop(gw);
+    KC_PERF(S_SAVE_LOAD, tickLoadPumpBackstop(gw));
 
     // Scenario onTick (harness) AFTER apply, so a join's RECV line reflects the
     // applied pos; latches the verdict + begins the capture hold on completion.
-    tickScenarioTick(gw);
+    KC_PERF(S_HARNESS, tickScenarioTick(gw));
+
+    perfEndTick(perfHookT0);
 }
 
 // Title-screen update hook: a safe main-thread point every frame the menu is up.
@@ -2328,6 +2367,19 @@ __declspec(dllexport) void startPlugin() {
     }
 
     logStartupBanner();
+
+    // Per-section tick cost (core/TickProfiler.h). Armed before the hook goes in
+    // so the first window covers the first tick.
+    {
+        LARGE_INTEGER f;
+        g_perfFreq     = QueryPerformanceFrequency(&f) ? (unsigned __int64)f.QuadPart : 0;
+        g_perfWindowMs = g_perfFreq ? coop::perf::windowMsFromEnv() : 0;
+        char b[96];
+        _snprintf(b, sizeof(b) - 1, "[perf] tick profiler %s (window=%lums, KENSHICOOP_PERF_MS)",
+                  g_perfWindowMs ? "on" : "off", g_perfWindowMs);
+        b[sizeof(b) - 1] = '\0';
+        coopLog(b);
+    }
 
     // Hook the main-thread tick FIRST (early-return on failure), then wire the
     // replicator, engine detours and UI hooks as named install phases.

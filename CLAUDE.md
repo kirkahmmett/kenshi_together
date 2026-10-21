@@ -169,6 +169,19 @@ Senaryo manifest'i `scripts/scenarios.psd1`'de (Save, PrimaryGate, Gating/Adviso
 - `<Kenshi>\kenshi.log` ve `kenshi_info.log`: engine (ör. `alredy has destroy reason` = çift destroy).
 - Harness çıktıları `tools/test-runs/<stamp>/` altında.
 
+### Performans satırları (`core/TickProfiler.h`)
+
+Varsayılan olarak her 10 s'de bir (`KENSHICOOP_PERF_MS`, `0` = kapalı) iki satır:
+```
+[perf] win=10000ms ticks=1043 (104/s) hook=1.84/9.12ms engine=6.31/22.40ms top: pubOwned=0.52/3.10 ...
+[net] stats win=10000ms peers=1 up=48.2KB/s down=12.0KB/s pkts up=210/s down=60/s rttMax=37ms lossMax=0.0%
+```
+`a/b` = tick başına ortalama / pencerede tek çağrının en kötüsü (ms). `hook` motor dahil tüm kanca, `engine`
+Kenshi'nin kendi tick'i, `top` en pahalı 8 bölüm (isimler `perf::Section`). `[net]` ENet'in host sayaçlarından
+(protokol yükü dahil) ve en kötü bağlı peer'in RTT/kayıp oranından gelir. Optimizasyon iddiası bu satırlarla
+öncesi/sonrası karşılaştırılmadan yapılmaz. Yeni bir alt sistem kancaya eklenirse `KC_PERF(S_..., ...)` ile sar ve
+gerekirse `Section` + `sectionName`'e satır ekle (prototest "every section named" bunu kontrol eder).
+
 ## Tuzaklar (Faz 0'da doğrulananlar)
 
 - **Türkçe locale:** Bu makine `tr-TR`. `CrawlMove.Fixture.ps1` burada FAIL veriyor, `en-US` ile PASS veriyor.

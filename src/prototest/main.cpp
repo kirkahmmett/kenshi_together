@@ -34,6 +34,7 @@
 #include "../plugin/game/EngineFaults.h" // Phase 5c: fault throttle (pure inline)
 #include "../plugin/game/EngineCaps.h"   // Phase 5d: capability registry (pure inline)
 #include "../plugin/sync/ChangeGate.h"   // Phase 6: change-gated send/accept policy
+#include "../plugin/core/TickProfiler.h" // per-section tick cost + net window lines
 #include "../plugin/sync/SaveXfer.h"     // Part A: real save-transfer receiver end-to-end
 
 #include <set>
@@ -1766,6 +1767,73 @@ static void testChangeGate() {
           gateShouldSend(true, 80001, 80000, 0, 10000, false));
 }
 
+// ---- Tick profiler: accumulation, window edge, top-N formatting -------------
+
+static void testTickProfiler() {
+    std::printf("\n== tick profiler ==\n");
+    using namespace coop::perf;
+    const unsigned __int64 FREQ = 1000000; // 1 tick = 1 us
+
+    TickProfiler p;
+    // Window: the first call only opens it; due once windowMs has elapsed.
+    CHECK("window first call opens",   !p.windowDue(5000, 10000));
+    CHECK("window not due early",      !p.windowDue(14999, 10000));
+    CHECK("window due at length",       p.windowDue(15000, 10000));
+    CHECK("window restarts after due", !p.windowDue(15001, 10000));
+    CHECK("window off when 0",         !p.windowDue(999999, 0));
+
+    // Two ticks: hook 2 ms + 4 ms, engine 1 ms each, pubOwned once (3 ms),
+    // applyTargets twice (0.5 ms each), camCell never runs.
+    p.add(S_HOOK, 2000);    p.add(S_ENGINE, 1000); p.add(S_PUB_OWNED, 3000);
+    p.add(S_APPLY_TARGETS, 500); p.endTick();
+    p.add(S_HOOK, 4000);    p.add(S_ENGINE, 1000);
+    p.add(S_APPLY_TARGETS, 500); p.endTick();
+    CHECK_EQ("ticks counted",          p.ticks(), 2);
+    CHECK_EQ("hook sum",               p.acc(S_HOOK).sum, 6000);
+    CHECK_EQ("hook max",               p.acc(S_HOOK).max, 4000);
+    CHECK_EQ("applyTargets calls",     p.acc(S_APPLY_TARGETS).n, 2);
+    CHECK("hook avg is per tick",      p.avgMs(S_HOOK, FREQ) > 2.999 && p.avgMs(S_HOOK, FREQ) < 3.001);
+    CHECK("hook max in ms",            p.maxMs(S_HOOK, FREQ) > 3.999 && p.maxMs(S_HOOK, FREQ) < 4.001);
+    CHECK("out-of-range section ignored", (p.add(S_COUNT, 5), p.add(-1, 5), true));
+
+    char line[512];
+    p.format(line, sizeof(line), FREQ, 10000, 5);
+    CHECK("format header",       std::strstr(line, "[perf] win=10000ms ticks=2 (0/s)") != 0);
+    CHECK("format hook",         std::strstr(line, "hook=3.00/4.00ms") != 0);
+    CHECK("format engine",       std::strstr(line, "engine=1.00/1.00ms") != 0);
+    const char* po = std::strstr(line, "pubOwned=1.50/3.00");
+    const char* at = std::strstr(line, "applyTargets=0.50/0.50");
+    CHECK("top lists pubOwned",      po != 0);
+    CHECK("top lists applyTargets",  at != 0);
+    CHECK("top sorted by sum",       po != 0 && at != 0 && po < at);
+    CHECK("top skips idle sections", std::strstr(line, "camCell") == 0);
+    const char* top = std::strstr(line, "top:");
+    CHECK("top excludes hook/engine",
+          top != 0 && std::strstr(top, "hook=") == 0 && std::strstr(top, "engine=") == 0);
+
+    p.format(line, sizeof(line), FREQ, 10000, 1);
+    CHECK("topN caps the list",      std::strstr(line, "applyTargets") == 0);
+
+    char tiny[24];
+    int n = p.format(tiny, sizeof(tiny), FREQ, 10000, 5);
+    CHECK("format truncates in cap", n == (int)sizeof(tiny) - 1 && tiny[sizeof(tiny) - 1] == '\0');
+
+    p.reset();
+    CHECK_EQ("reset clears ticks",   p.ticks(), 0);
+    CHECK_EQ("reset clears sums",    p.acc(S_PUB_OWNED).sum, 0);
+
+    // Net line: 10 s window, 512000 B up = 50.0 KB/s, 200 packets = 20/s.
+    formatNetStats(line, sizeof(line), 10000, 512000, 102400, 200, 100, 1, 37, 2.5);
+    CHECK("net up KB/s",   std::strstr(line, "up=50.0KB/s") != 0);
+    CHECK("net down KB/s", std::strstr(line, "down=10.0KB/s") != 0);
+    CHECK("net pkts/s",    std::strstr(line, "pkts up=20/s down=10/s") != 0);
+    CHECK("net rtt+loss",  std::strstr(line, "rttMax=37ms lossMax=2.5%") != 0);
+
+    for (int s = 0; s < S_COUNT; ++s)
+        if (std::strcmp(sectionName(s), "?") == 0) { CHECK("every section named", false); return; }
+    CHECK("every section named", true);
+}
+
 int main() {
     std::printf("prototest: KenshiCoop wire/hash/interp unit layer (protocol v%u)\n",
                 (unsigned)PROTOCOL_VERSION);
@@ -1774,6 +1842,7 @@ int main() {
     testEngineFaults();
     testEngineCaps();
     testChangeGate();
+    testTickProfiler();
     testRoundTrips();
     testFraming();
     testSaveCrc();

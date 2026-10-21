@@ -3,6 +3,7 @@
 #include "NetLink.h"
 #include "SteamP2P.h"
 #include "../CoopLog.h"
+#include "../core/TickProfiler.h" // formatNetStats / windowMsFromEnv ("[net] stats" window line)
 
 #include <cstring>
 #include <cstdio>
@@ -414,7 +415,41 @@ void NetLink::threadLoop() {
     unsigned int  syncSamples   = 0;
     const long    HALF_DAY_MS   = 12l * 3600l * 1000l;
 
+    // "[net] stats" window line: what actually crossed the wire (ENet's host
+    // counters, protocol overhead included) plus the worst connected peer's RTT
+    // and reliable-packet loss. Same window as the main thread's "[perf]" line.
+    const unsigned long statsWindowMs = perf::windowMsFromEnv();
+    DWORD statsStart = GetTickCount();
+    enetHost_->totalSentData = enetHost_->totalReceivedData = 0;
+    enetHost_->totalSentPackets = enetHost_->totalReceivedPackets = 0;
+
     while (!stopFlag_) {
+        if (statsWindowMs) {
+            DWORD statsNow = GetTickCount();
+            if (statsNow - statsStart >= statsWindowMs) {
+                unsigned int  peers   = 0;
+                unsigned long rttMax  = 0;
+                double        lossMax = 0.0;
+                for (size_t i = 0; i < enetHost_->peerCount; ++i) {
+                    const ENetPeer& p = enetHost_->peers[i];
+                    if (p.state != ENET_PEER_STATE_CONNECTED) continue;
+                    ++peers;
+                    if (p.roundTripTime > rttMax) rttMax = p.roundTripTime;
+                    double loss = 100.0 * (double)p.packetLoss / (double)ENET_PEER_PACKET_LOSS_SCALE;
+                    if (loss > lossMax) lossMax = loss;
+                }
+                char b[224];
+                perf::formatNetStats(b, sizeof(b), statsNow - statsStart,
+                                     enetHost_->totalSentData, enetHost_->totalReceivedData,
+                                     enetHost_->totalSentPackets, enetHost_->totalReceivedPackets,
+                                     peers, rttMax, lossMax);
+                netLog(b);
+                enetHost_->totalSentData = enetHost_->totalReceivedData = 0;
+                enetHost_->totalSentPackets = enetHost_->totalReceivedPackets = 0;
+                statsStart = statsNow;
+            }
+        }
+
         // Steam heartbeat: spike ping/echo + session-state change logging.
         // Cheap no-op when Steam isn't initialised (pure-UDP sessions).
         steamp2p::tick();
