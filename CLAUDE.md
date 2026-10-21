@@ -22,6 +22,20 @@ Yanıtlar Türkçe; teknik terimler İngilizce kalabilir.
 - `docs/API_REFERENCE.md` §8–§13 **eski** (`NetClient`, `MainThreadQueue`, `Protocol.h` artık yok).
   Canlı karşılıkları: `net/NetLink`, `core/Inbound`, `netproto/Wire.h`, `src/plugin/test/`.
   README'de geçen `src/nettest/` da artık yok.
+- **Öncelik (kullanıcı kararı, 2026-10-21): önce VANİLLA oyunda co-op.** Ek mod uyumluluğu (mod listesi
+  karşılaştırması, Workshop mod testleri) şimdilik kapsam dışı. Bu makinedeki Steam hesabı 46 Workshop
+  mod'una abone, ama `data\mods.cfg`'de yalnızca `KenshiCoop.mod` etkin - testler vanilla oyunda koşar.
+
+### Bu makinedeki oyun kurulumu (2026-10-21)
+
+- Steam'in kurduğu sürüm **1.0.68** (`kenshi_x64.exe` MD5 `8a03c256…`), KenshiCoop ise 1.0.65 için yazılı.
+  RE_Kenshi 0.3.5 (GitHub'dan, `_loose` paket) iki kuruluma da kurulu: sürümü tanımayınca kendini
+  `RE_Kenshi\kenshi_x64.exe`'den yeniden başlatır; o dosya, paketteki `courgette64 -apply` yamasıyla üretilmiş
+  **1.0.65** exe'si (MD5 `df4a5a7e…`, RE_Kenshi `config.json` tablosuyla doğrulandı). Orijinal exe'ye dokunulmadı.
+  Oyun penceresi başlığı "Kenshi 1.0.65" ise RE_Kenshi devrede demektir.
+- `Plugins_x64.cfg` ve `data\mods.cfg` yedekleri: `*.pre-rekenshi.bak`, `*.pre-kenshicoop.bak`.
+- Oyuncular için aynı kurulumu `scripts\installer\KenshiCoop-Setup.cmd` yapar (kit kökünde); `-DryRun`,
+  `-Uninstall [-RemoveReKenshi]` destekler.
 
 ## Derleme
 
@@ -89,6 +103,13 @@ Hepsi tek makinede iki Kenshi kurulumu ile çalışır: host Steam kurulumunda, 
 `%USERPROFILE%\Kenshi-Join` kopyasında (`scripts\setup_join_install.cmd`). Bağlantı `127.0.0.1:27800` üzerinden UDP;
 **Steam hesabı gerekmez.** Her iki kurulumda da RE_Kenshi olmalı. Save'ler `fixtures/saves/` altından
 `%LOCALAPPDATA%\kenshi\save` dizinine geri yüklenir.
+
+- Bu makinede çalışıyor: `coop_presence` 2026-10-21'de PASS. Harness'i **`en-US` kültürüyle** çalıştır:
+  `powershell -Command "[Threading.Thread]::CurrentThread.CurrentCulture='en-US'; & '.\scripts\regress.ps1' -SkipBuild"`.
+- Testler ekranda iki Kenshi penceresi açar ve açık Kenshi işlemlerini öldürür; kullanıcıya önceden haber ver.
+- Bir kurulumun ilk açılışında Kenshi "Mods warning" kutusu çıkarabilir; `start_kenshi.ps1` artık OK'a
+  `PostMessage` ile basar ve bu kutuyu "Evet" ile geçer (eskiden `SendMessage` testi 14 dk kilitliyordu).
+- Steam P2P ve Steam davetleri bu makinede test edilemez (iki ayrı Steam hesabı gerekir); harness hep UDP.
 
 ```powershell
 # Oyunsuz katman (milisaniyeler; her değişiklikte çalıştır)
