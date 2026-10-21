@@ -97,6 +97,7 @@ NetLink::NetLink()
       enetHost_(0), serverPeer_(0), inbound_(0),
       outOwner_(0), outStampMs_(0), haveOut_(false),
       thread_(0), running_(0), stopFlag_(0), myId_(0),
+      linkRttMs_(0), linkLossPermille_(0),
       sendEpoch_(0),
       steamPeer_(0),
       simDelayMs_(0), simJitterMs_(0), simLossPct_(0) {
@@ -449,8 +450,28 @@ void NetLink::threadLoop() {
     DWORD statsStart = GetTickCount();
     enetHost_->totalSentData = enetHost_->totalReceivedData = 0;
     enetHost_->totalSentPackets = enetHost_->totalReceivedPackets = 0;
+    DWORD healthAt = 0;
 
     while (!stopFlag_) {
+        // Link health for the on-screen status, ~1 Hz (ENet keeps these per
+        // peer; the worst connected peer is what a player feels).
+        {
+            DWORD healthNow = GetTickCount();
+            if (healthNow - healthAt >= 1000) {
+                healthAt = healthNow;
+                unsigned long rtt = 0, loss = 0;
+                for (size_t i = 0; i < enetHost_->peerCount; ++i) {
+                    const ENetPeer& p = enetHost_->peers[i];
+                    if (p.state != ENET_PEER_STATE_CONNECTED) continue;
+                    if (p.roundTripTime > rtt) rtt = p.roundTripTime;
+                    unsigned long l = (unsigned long)((unsigned __int64)p.packetLoss * 1000ull /
+                                                      ENET_PEER_PACKET_LOSS_SCALE);
+                    if (l > loss) loss = l;
+                }
+                InterlockedExchange(&linkRttMs_, (LONG)rtt);
+                InterlockedExchange(&linkLossPermille_, (LONG)loss);
+            }
+        }
         if (statsWindowMs) {
             DWORD statsNow = GetTickCount();
             if (statsNow - statsStart >= statsWindowMs) {

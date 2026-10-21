@@ -796,6 +796,20 @@ void coopPanelDrive() {
     if (g_peerPresent) {
         detail = g_cfg.isHost ? "Connected - peer joined" : "Connected to host";
         ostate = 2;
+        // Link health: ping (rounded to 10 ms so the panel does not rebuild on
+        // every jitter) and reliable-packet loss when there is any. A weak link
+        // turns the banner yellow - it explains rubber-banding before anyone
+        // has to open a log.
+        unsigned int rtt  = ((g_net.linkRttMs() + 5) / 10) * 10;
+        unsigned int loss = g_net.linkLossPermille();
+        char hb[64];
+        if (loss >= 10)
+            _snprintf(hb, sizeof(hb) - 1, "  |  ping %u ms, loss %u%%", rtt, (loss + 5) / 10);
+        else
+            _snprintf(hb, sizeof(hb) - 1, "  |  ping %u ms", rtt);
+        hb[sizeof(hb) - 1] = '\0';
+        detail += hb;
+        if (rtt > 250 || loss > 50) { detail += "  (weak link)"; ostate = 1; }
     } else if (g_net.isRunning()) {
         detail = g_cfg.isHost ? "Hosting - waiting for peer..." : "Connecting...";
         if (!lastErr.empty()) detail += " (" + lastErr + ")";

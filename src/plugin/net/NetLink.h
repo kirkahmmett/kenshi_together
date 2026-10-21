@@ -218,6 +218,12 @@ public:
     // a port in use, a host that refused us). Thread-safe.
     static std::string lastError();
 
+    // Link health for the on-screen status (refreshed ~1 Hz by the net thread):
+    // the worst connected peer's ENet round-trip time and reliable-packet loss
+    // in permille. 0/0 when nobody is connected. Atomic reads, any thread.
+    u32 linkRttMs() const        { return (u32)linkRttMs_; }
+    u32 linkLossPermille() const { return (u32)linkLossPermille_; }
+
     bool isRunning() const { return running_ != 0; }
     // host = 0; client = id from WELCOME. myId_ is written by the NET thread when
     // the WELCOME arrives and read here on the MAIN thread, so it is a volatile
@@ -345,6 +351,9 @@ private:
     // Written by the NET thread on WELCOME (InterlockedExchange) and read on the
     // MAIN thread via localId(); volatile LONG so the read is atomic + uncached.
     volatile LONG myId_;
+    // Link health (see linkRttMs): written by the net thread, read anywhere.
+    volatile LONG linkRttMs_;
+    volatile LONG linkLossPermille_;
 
     // Session epoch (protocol 44). sendEpoch_ is bumped by the MAIN thread
     // (InterlockedIncrement in bumpSessionEpoch) and read by the NET thread when
