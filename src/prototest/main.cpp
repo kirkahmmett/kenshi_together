@@ -876,6 +876,80 @@ static void testSaveXferRoundTrip() {
     xferNukeDir(rootStr);
 }
 
+// Data-safety of the save-transfer RECEIVER (upstream PR #16): no transfer may
+// replace or remove a real save unless it is complete, non-empty, verified and
+// safely named, and a commit that died mid-swap must heal on the next transfer.
+static bool xferExists(const std::string& path) {
+    return GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+static void testSaveXferSafety() {
+    std::printf("== save-transfer receiver data safety (PR #16) ==\n");
+    char tmp[MAX_PATH]; tmp[0] = '\0';
+    GetTempPathA(sizeof(tmp), tmp);
+    char root[MAX_PATH];
+    _snprintf(root, sizeof(root) - 1, "%skc_xfer_safety_%lu", tmp,
+              (unsigned long)GetCurrentProcessId());
+    root[sizeof(root) - 1] = '\0';
+    std::string rootStr = root;
+    xferNukeDir(rootStr);
+    CreateDirectoryA(rootStr.c_str(), 0);
+    savexfer::setSaveRootForTest(rootStr);
+
+    std::vector<unsigned char> quick(3000);
+    for (unsigned i = 0; i < quick.size(); ++i) quick[i] = (unsigned char)(i * 5 + 9);
+    XferSrcFile srcs[1];
+    srcs[0].rel = "quick.save"; srcs[0].data = &quick[0]; srcs[0].len = (unsigned)quick.size();
+
+    // A real save the join already has, plus a second unrelated one. Each case
+    // re-seeds it, so one case's damage cannot hide or fake the next one's.
+    CHECK("safety: seed save committed", xferRun("coopresume", srcs, 1, 10, -1) == 1);
+    CHECK("safety: second save committed", xferRun("other", srcs, 1, 11, -1) == 1);
+    std::string real  = savexfer::saveFolderFor("coopresume");
+    std::string other = savexfer::saveFolderFor("other");
+
+    // A) A degenerate transfer (0 files) must not commit: it would swap the real
+    //    save for an empty folder and then delete the backup.
+    int ra = xferRun("coopresume", srcs, 0, 12, -1);
+    CHECK("safety: zero-file transfer refused", ra == 0);
+    CHECK("safety: zero-file transfer leaves the real save", xferExists(real + "\\quick.save"));
+
+    // B) An empty name resolves to the save ROOT: nothing may be staged there,
+    //    and no save may move.
+    xferRun("coopresume", srcs, 1, 20, -1);
+    int rb = xferRun("", srcs, 1, 13, -1);
+    CHECK("safety: empty-name transfer refused", rb == 0);
+    CHECK("safety: empty name stages nothing at the root",
+          !xferExists(rootStr + "\\__incoming"));
+    CHECK("safety: empty name leaves other saves",
+          xferExists(real + "\\quick.save") && xferExists(other + "\\quick.save"));
+
+    // C) A commit that died between "move real save out" and "move staging in"
+    //    left the save only as <name>__old: the next transfer must restore it,
+    //    even when that transfer itself fails.
+    xferRun("coopresume", srcs, 1, 21, -1);
+    MoveFileExA(real.c_str(), (real + "__old").c_str(), MOVEFILE_WRITE_THROUGH);
+    CHECK("safety: (setup) save stranded in __old",
+          !xferExists(real) && xferExists(real + "__old\\quick.save"));
+    int rc = xferRun("coopresume", srcs, 1, 14, /*corrupt*/0);
+    CHECK("safety: corrupt transfer still refused", rc == 0);
+    CHECK("safety: stranded save restored from __old", xferExists(real + "\\quick.save"));
+    CHECK("safety: no __old left behind", !xferExists(real + "__old"));
+
+    // D) A name that climbs out of the save root must not write outside it:
+    //    "..\kc_xfer_safety_escape" resolves to a sibling of the root.
+    std::string outside = std::string(tmp) + "kc_xfer_safety_escape";
+    xferNukeDir(outside);
+    int rd = xferRun("..\\kc_xfer_safety_escape", srcs, 1, 15, -1);
+    CHECK("safety: traversal name refused", rd == 0);
+    CHECK("safety: nothing written outside the save root",
+          !xferExists(outside) && !xferExists(outside + "__incoming"));
+
+    savexfer::setSaveRootForTest(std::string());
+    xferNukeDir(rootStr);
+    xferNukeDir(outside);
+}
+
 // ---- 4. Content hash (the inventory convergence key) -----------------------------
 
 static InvItemEntry makeEntry() {
@@ -1848,6 +1922,7 @@ int main() {
     testSaveCrc();
     testFolderFingerprint();
     testSaveXferRoundTrip();
+    testSaveXferSafety();
     testContentHash();
     testInterp();
     testOwnRanks();
