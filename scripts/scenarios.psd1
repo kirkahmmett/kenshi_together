@@ -1510,6 +1510,27 @@
             Tier = 'full'; WanVariant = $false
         }
 
+        # perm_storage (protocol 56, issue #42): with the host's "join may use
+        # storage" switch OFF, a JOIN take out of a storage chest is refused and
+        # the item stays put. perm_storage_allow is the same take with the
+        # default (allowed) and must go through. No channel is needed: the
+        # permissions packet is always sent, and the join acts on its own world.
+        perm_storage = @{
+            DiagEnv = @{ KENSHICOOP_JOIN_CONTAINERS = '0' }
+            Save = 'squad1'; Setup = ''; Tolerance = 3.0
+            PrimaryGate = 'perm_storage'
+            Gating   = @('perm_storage')
+            Advisory = @()
+            Tier = 'full'; WanVariant = $false
+        }
+        perm_storage_allow = @{
+            Save = 'squad1'; Setup = ''; Tolerance = 3.0
+            PrimaryGate = 'perm_storage_allow'
+            Gating   = @('perm_storage_allow')
+            Advisory = @()
+            Tier = 'full'; WanVariant = $false
+        }
+
         # bootstrap_stream: the missing-save "seamless join" proof (protocol
         # 31/32). NOT a run_test tier member and NOT run_test-drivable - it needs
         # the join-from-MENU launch (join has NO save, goes ONLINE, host bakes +

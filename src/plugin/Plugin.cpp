@@ -2300,30 +2300,31 @@ void installEngineDetours() {
 
     // Purchase observability (protocol 52 groundwork): log every real trade-UI
     // purchase ("[shop] BUY-LOCAL"), the field evidence for the vendor-stock
-    // mirror design. Rides the money-sync gate.
-    if (g_cfg.moneySync) {
-        if (coop::engine::installShopHook())
-            coopLog("[shop] buyItem detour installed; purchase logging ON");
-        else
-            coopLog("[shop] FAILED to install buyItem detour; purchase logging off");
-    }
+    // mirror design. Always installed: it also enforces the host's "join may
+    // buy" switch (protocol 56) and marks a purchase in progress, which the
+    // storage switch in the drag detours below must not mistake for a take
+    // out of a shop's storage.
+    if (coop::engine::installShopHook())
+        coopLog("[shop] buyItem detour installed; purchase logging ON");
+    else
+        coopLog("[shop] FAILED to install buyItem detour; purchase logging off");
 
     // Cross-owner trade veto (KENSHICOOP_BLOCK_XFER, default ON in real sessions):
     // refuse a UI inventory drag whose source + destination squad characters are
     // owned by different clients (item stays in the source bag) so ground drops
     // are the only cross-client transfer path. Retires Protocol 37 (Config forces
-    // xferSync off when this is on). The classifier is always registered (cheap);
-    // the detours install only when the veto is on or the xfer_block test runs.
+    // xferSync off when this is on). The classifier is always registered (cheap).
+    // The detours are ALWAYS installed: the host's "join may use storage" switch
+    // (protocol 56) is enforced in them, and the role can change in the panel at
+    // runtime. With the veto off and storage allowed they only test two flags.
     coop::engine::setInvOwnerClassifier(&coopInvOwnerClass);
     coop::engine::setBlockXfer(g_cfg.blockXfer);
-    if (g_cfg.blockXfer || g_cfg.scenario == "xfer_block") {
-        if (coop::engine::installXferBlockHook())
-            coopLog(g_cfg.blockXfer
-                ? "[xfer] drag detours installed; cross-owner trade veto ON (drop to transfer)"
-                : "[xfer] drag detours installed; drag logging ON");
-        else
-            coopLog("[xfer] FAILED to install drag detours; cross-owner trade veto degraded");
-    }
+    if (coop::engine::installXferBlockHook())
+        coopLog(g_cfg.blockXfer
+            ? "[xfer] drag detours installed; cross-owner trade veto ON (drop to transfer)"
+            : "[xfer] drag detours installed; veto off, storage permission enforced here");
+    else
+        coopLog("[xfer] FAILED to install drag detours; trade veto and storage permission degraded");
 
     // Phase W1b: query-free ground-drop capture (town reliability). Detour
     // Inventory::dropItem so every drop is discovered without the spatial sphere

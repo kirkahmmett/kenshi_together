@@ -160,6 +160,8 @@ function Invoke-OneOracle {
         "money_persist"  { return (Test-MoneyPersist   -HostFile $HostLog -JoinFile $JoinLog) }
         "bag_persist"    { return (Test-BagPersist     -HostFile $HostLog -JoinFile $JoinLog) }
         "bag_persist_race" { return (Test-BagPersist   -HostFile $HostLog -JoinFile $JoinLog -Race) }
+        "perm_storage"       { return (Test-PermStorage -HostFile $HostLog -JoinFile $JoinLog) }
+        "perm_storage_allow" { return (Test-PermStorage -HostFile $HostLog -JoinFile $JoinLog -Allow) }
         "connect_bootstrap" { return (Test-ConnectBootstrap -HostFile $HostLog -JoinFile $JoinLog) }
         "connect_stream"    { return (Test-ConnectStream    -HostFile $HostLog -JoinFile $JoinLog) }
         "prod_probe"     { return (Test-ProdProbe      -HostFile $HostLog -JoinFile $JoinLog) }

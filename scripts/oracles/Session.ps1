@@ -892,3 +892,54 @@ function Test-BagPersist {
                 -Metrics @{ added = $added; hostLatch = $latchCount; hostPost = $hp; joinPost = $jp } -Detail $detail)
 }
 
+
+# perm_storage / perm_storage_allow (protocol 56, issue #42): the JOIN takes one
+# item out of a storage chest it placed. With KENSHICOOP_JOIN_CONTAINERS=0 on
+# the host the take must be refused (nothing moves, refusal kind 2); with the
+# default it must go through. The verdict is the join's own PERMST lines.
+function Test-PermStorage {
+    param([string]$HostFile, [string]$JoinFile, [switch]$Allow)
+    $gateName = if ($Allow) { "perm_storage_allow" } else { "perm_storage" }
+    $why = @()
+    $perm = Select-String -Path $JoinFile -Pattern '\[perm\] join permissions: build=(\d) containers=(\d) buy=(\d)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+    # The join logs the set only when it CHANGES, so the all-allowed default
+    # leaves no line; only the restricted run must show one.
+    $cont = if ($Allow) { 1 } else { -1 }
+    if ($null -eq $perm) { if (-not $Allow) { $why += "join never received the host's permissions" } }
+    else {
+        $cont = [int]$perm.Matches[0].Groups[2].Value
+        $want = if ($Allow) { 1 } else { 0 }
+        if ($cont -ne $want) { $why += "join got containers=$cont, want $want" }
+    }
+    $place = Select-String -Path $JoinFile -Pattern 'SCENARIO PERMST place rc=(-?\d+) ok=(\d)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+    if ($null -eq $place) { $why += "join never placed its chest" }
+    elseif ($place.Matches[0].Groups[2].Value -ne '1') { $why += "chest placement failed (rc=$($place.Matches[0].Groups[1].Value))" }
+    $stock = Select-String -Path $JoinFile -Pattern 'SCENARIO PERMST stock got=(-?\d+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+    if ($null -eq $stock) { $why += "chest never completed / was never stocked" }
+    elseif ([int]$stock.Matches[0].Groups[1].Value -le 0) { $why += "chest refused every stock item" }
+    $take = Select-String -Path $JoinFile -Pattern 'SCENARIO PERMST take moved=(-?\d+) chestBefore=(-?\d+) chestAfter=(-?\d+) refusals=(\d+) kind=(-?\d+) leaderBefore=(-?\d+) leaderAfter=(-?\d+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+    $moved = -2
+    if ($null -eq $take) { $why += "join never attempted the take" }
+    else {
+        $g = $take.Matches[0].Groups
+        $moved = [int]$g[1].Value
+        if ($Allow) {
+            if ($moved -lt 1) { $why += "take was refused although storage is allowed (moved=$moved)" }
+            elseif ($moved -ne [int]$g[2].Value -or $g[3].Value -ne '0') { $why += "take moved $moved of $($g[2].Value), chest left with $($g[3].Value)" }
+            elseif ([int]$g[7].Value -ne [int]$g[6].Value + [int]$g[2].Value) { $why += "leader went $($g[6].Value) -> $($g[7].Value), want +$($g[2].Value) (items lost or duplicated)" }
+        } else {
+            # A refused take reports 'moved' (the veto returns the item and calls the
+            # add handled), so the counts are the evidence: nothing may change.
+            if ($g[2].Value -ne $g[3].Value) { $why += "chest count changed $($g[2].Value) -> $($g[3].Value) on a refused take" }
+            if ($g[6].Value -ne $g[7].Value) { $why += "leader count changed $($g[6].Value) -> $($g[7].Value) on a refused take" }
+            if ([int]$g[4].Value -lt 1 -or $g[5].Value -ne '2') { $why += "no storage refusal recorded (refusals=$($g[4].Value) kind=$($g[5].Value))" }
+        }
+    }
+    $verdict = Select-String -Path $JoinFile -Pattern 'SCENARIO PERMST verdict .* ok=(\d)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+    if ($null -eq $verdict) { $why += "join never logged its verdict" }
+    elseif ($verdict.Matches[0].Groups[1].Value -ne '1' -and $why.Count -eq 0) { $why += "join verdict FAIL" }
+    $v = if ($why.Count -eq 0) { "PASS" } else { "FAIL" }
+    $detail = $why -join "; "
+    Write-Host "  PERM-STORAGE$(if ($Allow) { '-ALLOW' }) $v - containers=$cont moved=$moved $detail"
+    return (Add-GateResult -Name $gateName -Status $v -Metrics @{ containers = $cont; moved = $moved } -Detail $detail)
+}

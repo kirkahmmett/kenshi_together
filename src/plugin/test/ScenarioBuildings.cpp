@@ -1499,6 +1499,197 @@ private:
     char          addSid_[48];
 };
 
+// perm_storage / perm_storage_allow (protocol 56, issue #42): the host's "join
+// may use storage" switch must refuse a JOIN taking items out of a storage
+// building, and leave the take alone when allowed. The join drives it all on
+// its own copy of the world (the switch is enforced locally on the join):
+//   t=8s   place a storage chest leader-relative and ramp it complete (probe
+//          placement - not a build-mode commit, so the build switch is moot);
+//   chest complete: fabricate STOCK_QTY items into it (any stackable it takes);
+//   t=20s  take into its tab leader via moveItemBetweenContainers(...,
+//          suspendVeto=false) - the remove+add a UI drag performs. Refused run:
+//          the whole stack. Allowed run: ONE unit first (a partial stack), then
+//          the rest - both legs must conserve the total exactly (the helper
+//          once lost a partial take and turned a moved stack of 3 into 5).
+// perm_storage runs with KENSHICOOP_JOIN_CONTAINERS=0 on the host: the take
+// must return 0, the chest must still hold every item, and the refusal must be
+// recorded as kind 2. perm_storage_allow runs with the default (allowed): the
+// take must move the item. The host only waits.
+class PermStorageScenario : public TimedScenario {
+public:
+    explicit PermStorageScenario(bool expectRefused)
+        : TimedScenario(expectRefused ? "perm_storage" : "perm_storage_allow", 0),
+          expectRefused_(expectRefused), haveLeader_(false), placed_(false),
+          placeOk_(false), rampDone_(false), rampStep_(0), nextRampMs_(0),
+          stocked_(false), stockGot_(0), type_(0), tried_(false), moved_(-2),
+          chestBefore_(-1), chestAfter_(-1), leaderBefore_(-1),
+          leaderAfter_(-1), movedFirst_(-2), chestMid_(-1), leaderMid_(-1), seq0_(0), seqAfter_(0), kind_(0) {
+        memset(leader_, 0, sizeof(leader_));
+        memset(chest_, 0, sizeof(chest_));
+        sid_[0] = '\0'; chestSid_[0] = '\0';
+    }
+
+    virtual void onStart(const ScenarioContext& ctx) {
+        if (!ctx.isHost) {
+            EntityState sq[32];
+            unsigned int n = engine::captureSquad(ctx.gw, /*leaderOnly*/ false, sq, 32);
+            int li = tabLeaderIdx(sq, n, 1);
+            if (li >= 0) { handFromEntity(sq[li], leader_); haveLeader_ = true; }
+        }
+        char b[96];
+        _snprintf(b, sizeof(b) - 1, "SCENARIO PERMST start host=%d leader=%d",
+                  ctx.isHost ? 1 : 0, haveLeader_ ? 1 : 0);
+        b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    }
+
+    virtual bool onTick(const ScenarioContext& ctx) {
+        if (!ctx.isHost && haveLeader_) {
+            if (!placed_ && ctx.elapsedMs >= PLACE_AT_MS) {
+                placed_ = true;
+                int rc = engine::probePlaceMachine(ctx.gw, 10.0f, 2.0f, /*kind*/2,
+                                                   chest_, chestSid_, sizeof(chestSid_));
+                placeOk_ = (rc == 1) && (chest_[4] != 0 || chest_[3] != 0);
+                nextRampMs_ = ctx.elapsedMs + RAMP_STEP_MS;
+                char b[200];
+                _snprintf(b, sizeof(b) - 1,
+                          "SCENARIO PERMST place rc=%d ok=%d sid='%s' hand=%u.%u.%u.%u.%u t=%lu",
+                          rc, placeOk_ ? 1 : 0, chestSid_, chest_[0], chest_[1],
+                          chest_[2], chest_[3], chest_[4], ctx.elapsedMs);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+            if (placeOk_ && !rampDone_ && rampStep_ < MAX_RAMP_STEPS &&
+                ctx.elapsedMs >= nextRampMs_) {
+                ++rampStep_;
+                nextRampMs_ = ctx.elapsedMs + RAMP_STEP_MS;
+                float want = 0.5f * (float)rampStep_;
+                if (want > 1.0f) want = 1.0f;
+                engine::BuildRead post;
+                if (engine::writeBuildProgressByHand(chest_, want, want >= 1.0f, &post) &&
+                    post.complete) rampDone_ = true;
+            }
+            if (rampDone_ && !stocked_) {
+                stocked_ = true;
+                stockGot_ = engine::probeAddAnyToContainer(ctx.gw, chest_, STOCK_QTY,
+                                                           sid_, sizeof(sid_));
+                chestBefore_ = chestCount(ctx.gw);
+                char b[160];
+                _snprintf(b, sizeof(b) - 1,
+                          "SCENARIO PERMST stock got=%d sid='%s' type=%u chest=%d t=%lu",
+                          stockGot_, sid_, type_, chestBefore_, ctx.elapsedMs);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+            if (stocked_ && stockGot_ > 0 && type_ != 0 && !tried_ &&
+                ctx.elapsedMs >= TAKE_AT_MS) {
+                tried_ = true;
+                chestBefore_ = chestCount(ctx.gw);
+                seq0_ = engine::permRefusalSeq();
+                leaderBefore_ = countIn(ctx.gw, leader_);
+                if (expectRefused_) {
+                    moved_ = engine::moveItemBetweenContainers(ctx.gw, chest_, leader_, sid_,
+                                                               type_, chestBefore_,
+                                                               /*suspendVeto*/ false);
+                } else {
+                    movedFirst_ = engine::moveItemBetweenContainers(ctx.gw, chest_, leader_,
+                                                                    sid_, type_, 1,
+                                                                    /*suspendVeto*/ false);
+                    chestMid_  = chestCount(ctx.gw);
+                    leaderMid_ = countIn(ctx.gw, leader_);
+                    int rest = engine::moveItemBetweenContainers(ctx.gw, chest_, leader_, sid_,
+                                                                 type_, chestBefore_ - 1,
+                                                                 /*suspendVeto*/ false);
+                    moved_ = movedFirst_ + rest;
+                }
+                seqAfter_ = engine::permRefusalSeq();
+                kind_ = engine::permRefusalKind();
+                chestAfter_ = chestCount(ctx.gw);
+                leaderAfter_ = countIn(ctx.gw, leader_);
+                char b[320];
+                _snprintf(b, sizeof(b) - 1,
+                          "SCENARIO PERMST take moved=%d chestBefore=%d chestAfter=%d "
+                          "refusals=%u kind=%d leaderBefore=%d leaderAfter=%d "
+                          "first=%d chestMid=%d leaderMid=%d t=%lu",
+                          moved_, chestBefore_, chestAfter_, seqAfter_ - seq0_, kind_,
+                          leaderBefore_, leaderAfter_, movedFirst_, chestMid_, leaderMid_,
+                          ctx.elapsedMs);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+        }
+        if (ctx.elapsedMs >= DURATION_MS) {
+            if (ctx.isHost) {
+                passed_ = true;
+            } else {
+                bool ok;
+                if (expectRefused_)
+                    ok = chestAfter_ == chestBefore_ && leaderAfter_ == leaderBefore_ &&
+                         seqAfter_ != seq0_ && kind_ == 2;
+                else
+                    ok = movedFirst_ == 1 && chestMid_ == chestBefore_ - 1 &&
+                         leaderMid_ == leaderBefore_ + 1 &&
+                         moved_ == chestBefore_ && chestAfter_ == 0 &&
+                         leaderAfter_ == leaderBefore_ + chestBefore_;
+                passed_ = tried_ && ok;
+                char b[160];
+                _snprintf(b, sizeof(b) - 1,
+                          "SCENARIO PERMST verdict expectRefused=%d tried=%d ok=%d",
+                          expectRefused_ ? 1 : 0, tried_ ? 1 : 0, passed_ ? 1 : 0);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+            return true;
+        }
+        return false;
+    }
+
+private:
+    // Quantity of the stocked sid in the chest; also latches its item type
+    // (probeAddAnyToContainer reports only the stringID).
+    int chestCount(GameWorld* gw) {
+        InvItemEntry ent[64];
+        unsigned int hash = 0;
+        unsigned int n = engine::captureContainerContents(gw, chest_, ent, 64, &hash);
+        int q = 0;
+        for (unsigned int i = 0; i < n; ++i)
+            if (sid_[0] && strcmp(ent[i].stringID, sid_) == 0) {
+                q += (int)ent[i].quantity;
+                type_ = ent[i].itemType;
+            }
+        return q;
+    }
+    // Quantity of the stocked sid the object at h holds (loose + worn).
+    int countIn(GameWorld* gw, const unsigned int h[5]) {
+        InvItemEntry ent[64];
+        unsigned int hash = 0;
+        unsigned int n = engine::captureContainerContents(gw, h, ent, 64, &hash);
+        int q = 0;
+        for (unsigned int i = 0; i < n; ++i)
+            if (sid_[0] && strcmp(ent[i].stringID, sid_) == 0) q += (int)ent[i].quantity;
+        return q;
+    }
+
+    static const unsigned long PLACE_AT_MS    = 8000;
+    static const unsigned long RAMP_STEP_MS   = 3000;
+    static const unsigned int  MAX_RAMP_STEPS = 8;
+    static const unsigned long TAKE_AT_MS     = 20000;
+    static const unsigned long DURATION_MS    = 30000;
+    static const int           STOCK_QTY      = 3;
+
+    bool          expectRefused_;
+    bool          haveLeader_, placed_, placeOk_, rampDone_;
+    unsigned int  rampStep_;
+    unsigned long nextRampMs_;
+    bool          stocked_;
+    int           stockGot_;
+    unsigned int  type_;
+    bool          tried_;
+    int           moved_, chestBefore_, chestAfter_, leaderBefore_, leaderAfter_;
+    int           movedFirst_, chestMid_, leaderMid_;
+    unsigned int  seq0_, seqAfter_;
+    int           kind_;
+    unsigned int  leader_[5];
+    unsigned int  chest_[5];
+    char          sid_[48];
+    char          chestSid_[48];
+};
+
 } // namespace
 
 Scenario* makeBuildingScenario(const std::string& name) {
@@ -1516,6 +1707,8 @@ Scenario* makeBuildingScenario(const std::string& name) {
     if (name == "research_sync")  return new ResearchProbeScenario(false);
     if (name == "store_probe")    return new StoreProbeScenario(true);
     if (name == "store_sync")     return new StoreProbeScenario(false);
+    if (name == "perm_storage")       return new PermStorageScenario(true);
+    if (name == "perm_storage_allow") return new PermStorageScenario(false);
     return 0;
 }
 

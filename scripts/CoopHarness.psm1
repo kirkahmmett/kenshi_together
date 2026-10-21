@@ -46,6 +46,10 @@ $script:CoopDiagEnvKeys = @(
     'KENSHICOOP_STORE_SYNC'
     'KENSHICOOP_SQUAD_SYNC'
     'KENSHICOOP_LATEJOIN_SYNC'
+    # --- host settings for the join (protocol 56; Config.cpp, host side) ---
+    'KENSHICOOP_JOIN_BUILD'
+    'KENSHICOOP_JOIN_CONTAINERS'
+    'KENSHICOOP_JOIN_BUY'
     # --- log-only diagnostic traces (read outside Config; never gate behavior) ---
     'KENSHICOOP_INV_DUMP'
     'KENSHICOOP_DEBUG_SPEED'
