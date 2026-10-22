@@ -100,6 +100,8 @@ NetLink::NetLink()
       linkRttMs_(0), linkLossPermille_(0),
       sendEpoch_(0),
       steamPeer_(0),
+      steamOpen_(false),
+      relayed_(0),
       simDelayMs_(0), simJitterMs_(0), simLossPct_(0) {
     InitializeCriticalSection(&outCs_);
 }
@@ -312,8 +314,29 @@ void NetLink::setNetSim(unsigned int delayMs, unsigned int jitterMs, unsigned in
     simLossPct_  = (lossPct > 100) ? 100 : lossPct;
 }
 
-void NetLink::setSteamTransport(unsigned long long peerSteamId) {
+void NetLink::setSteamTransport(unsigned long long peerSteamId, bool hostOpen) {
     steamPeer_ = peerSteamId;
+    steamOpen_ = hostOpen;
+}
+
+// Protocol 57 (three players): join-authored STATE the host forwards, verbatim and
+// author ownerId intact, to every other join - each join then sees the others the
+// way the host does. Not relayed: the handshake, clock sync, and the requests and
+// reports only the host acts on (speed/save/load/spawn requests, camera hints,
+// combat hits, money deltas); a host -> join packet never arrives from a join.
+static bool relayToJoins(u8 type) {
+    switch (type) {
+        case PKT_ENTITY_BATCH: case PKT_EVENT: case PKT_INV_SNAPSHOT:
+        case PKT_WORLD_ITEM: case PKT_WORLD_ITEM_REMOVE: case PKT_WORLD_DROP:
+        case PKT_WORLD_PICKUP: case PKT_MEDICAL: case PKT_TREATMENT: case PKT_STATS:
+        case PKT_FACTION: case PKT_DOOR: case PKT_BUILD_PLACE: case PKT_BUILD_STATE:
+        case PKT_BUILD_DOOR: case PKT_BUILD_REMOVE: case PKT_NPC_CENSUS:
+        case PKT_INV_XFER: case PKT_WORLD_ITEM_CLAIM: case PKT_CELL_CLAIM:
+        case PKT_INV_XFER_ACK: case PKT_DEED: case PKT_FIXTURE:
+            return true;
+        default:
+            return false;
+    }
 }
 
 // Deliver one received entity to the game thread, applying the WAN sim if enabled.
@@ -389,7 +412,7 @@ void NetLink::threadLoop() {
     // BEFORE the host is created (the fake socket is handed out at create time).
     // The tunnel is addressless; ENet still needs an ENetAddress for its peer
     // routing, so both sides use the fabricated "1.0.0.1:port".
-    const bool steam = (steamPeer_ != 0);
+    const bool steam = (steamPeer_ != 0) || steamOpen_;
     if (steam) {
         if (steamp2p::installEnetHooks(port_)) {
             netLog("transport=steam (ENet tunnelled over Steam P2P)");
@@ -425,7 +448,6 @@ void NetLink::threadLoop() {
         if (serverPeer_) serverPeer_->mtu = 1200;
     }
 
-    u32   nextId = 1;
     DWORD lastConnectAttempt = GetTickCount();
     // Join: did the current connection reach CONNECT / WELCOME? A host that
     // closes us between the two refused us (it rejects a protocol mismatch
@@ -532,7 +554,9 @@ void NetLink::threadLoop() {
                     // reconnecting peer may resume at a lower epoch than the one
                     // we last saw); forget prior per-owner epochs so the new
                     // session's first batch is never mistaken for stale (v44).
-                    epochSeen_.clear();
+                    // Host: the id (and so the owner to forget) is only known at
+                    // HELLO, which erases it there; the other joins keep theirs.
+                    if (!isHost_) epochSeen_.clear();
                     if (isHost_) {
                         // Wait for the client's HELLO before assigning an id, so
                         // a version mismatch is rejected before we admit it.
@@ -563,17 +587,26 @@ void NetLink::threadLoop() {
                                 netErr(b);
                                 enet_peer_disconnect(ev.peer, 0);
                             } else {
-                                u32 id = nextId++;
-                                // TWO-PLAYER ASSUMPTION (step-6 guard): the sync model
-                                // is host + ONE join. Join-authored events/inventory/
-                                // conservation intents reach only the host and are NOT
-                                // relayed to other joins, and OWNER_ID_ALL sweeps assume
-                                // a single peer. A third player connects at the wire
-                                // level but will silently desync - fail loudly instead.
-                                if (id >= 2) {
-                                    netErr("3+ players unsupported: join-authored state is "
-                                           "not relayed peer-to-peer; expect desync");
+                                // Lowest free id (protocol 57): the id is the join's
+                                // squad-tab rank, so a player who reconnects gets
+                                // their own tab back instead of a fresh number.
+                                u32 id = 1;
+                                for (; id < MAX_PLAYER_ID; ++id) {
+                                    bool used = false;
+                                    for (size_t i = 0; i < enetHost_->peerCount; ++i) {
+                                        ENetPeer* o = &enetHost_->peers[i];
+                                        if (o != ev.peer && o->data != 0 &&
+                                            (u32)(size_t)o->data == id) { used = true; break; }
+                                    }
+                                    if (!used) break;
                                 }
+                                if (id >= MAX_PLAYER_ID) {
+                                    netErr("session full; rejecting a player");
+                                    enet_peer_disconnect(ev.peer, 0);
+                                    enet_packet_destroy(ev.packet);
+                                    break;
+                                }
+                                epochSeen_.erase(id); // a rejoin restarts its epochs (v44)
                                 ev.peer->data = (void*)(size_t)id;
                                 WelcomePacket w;
                                 w.type = (u8)PKT_WELCOME; w.version = PROTOCOL_VERSION; w.playerId = id;
@@ -875,6 +908,21 @@ void NetLink::threadLoop() {
                             && inbound_) {
                             inbound_->pushFixture(fxp.ownerId, fxp);
                         }
+                    } else if (type == PKT_PEER_LEFT) {
+                        // Another join left (protocol 57, host -> join): drop what
+                        // it authored, as the host does on its own disconnect edge.
+                        PeerLeftPacket pl;
+                        if (!isHost_ &&
+                            readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &pl)
+                            && inbound_) {
+                            epochSeen_.erase(pl.playerId);
+                            inbound_->pushLeave(pl.playerId);
+                            char b[64];
+                            _snprintf(b, sizeof(b) - 1, "player %u left the session",
+                                      (unsigned)pl.playerId);
+                            b[sizeof(b) - 1] = '\0';
+                            netLog(b);
+                        }
                     } else if (type == PKT_PERMS) {
                         // Reliable join-permission set (protocol 56), host -> join.
                         PermsPacket pp;
@@ -1065,14 +1113,46 @@ void NetLink::threadLoop() {
                             }
                         }
                     }
+                    // Host: forward join-authored state to the other joins
+                    // (protocol 57). One packet, refcounted across the sends.
+                    if (isHost_ && ev.peer->data != 0 && relayToJoins(type)) {
+                        ENetPacket* fwd = enet_packet_create(
+                            ev.packet->data, ev.packet->dataLength,
+                            ev.packet->flags & (ENET_PACKET_FLAG_RELIABLE |
+                                                ENET_PACKET_FLAG_UNSEQUENCED));
+                        bool sent = false;
+                        for (size_t i = 0; fwd && i < enetHost_->peerCount; ++i) {
+                            ENetPeer* o = &enetHost_->peers[i];
+                            if (o == ev.peer || o->data == 0 ||
+                                o->state != ENET_PEER_STATE_CONNECTED) continue;
+                            if (enet_peer_send(o, ev.channelID, fwd) == 0) sent = true;
+                        }
+                        if (fwd && !sent) enet_packet_destroy(fwd);
+                        if (sent) ++relayed_;
+                    }
                     enet_packet_destroy(ev.packet);
                     break;
                 }
                 case ENET_EVENT_TYPE_DISCONNECT: {
-                    epochSeen_.clear(); // peer gone; its epoch sequence ends (v44)
+                    if (!isHost_) epochSeen_.clear(); // host gone; its epochs end (v44)
                     if (isHost_) {
                         u32 id = (u32)(size_t)ev.peer->data;
                         ev.peer->data = 0;
+                        epochSeen_.erase(id); // its epoch sequence ends (v44)
+                        // Tell the remaining joins (protocol 57) - a join sees
+                        // only the host disconnect itself.
+                        if (id != 0) {
+                            PeerLeftPacket pl;
+                            pl.type = (u8)PKT_PEER_LEFT; pl.playerId = id;
+                            for (size_t i = 0; i < enetHost_->peerCount; ++i) {
+                                ENetPeer* o = &enetHost_->peers[i];
+                                if (o == ev.peer || o->data == 0 ||
+                                    o->state != ENET_PEER_STATE_CONNECTED) continue;
+                                enet_peer_send(o, CH_RELIABLE,
+                                               enet_packet_create(&pl, sizeof(pl),
+                                                                  ENET_PACKET_FLAG_RELIABLE));
+                            }
+                        }
                         if (inbound_) inbound_->pushLeave(id);
                         char b[64];
                         _snprintf(b, sizeof(b) - 1, "peer disconnected id=%u", (unsigned)id);

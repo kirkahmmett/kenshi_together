@@ -819,6 +819,20 @@ public:
     void drainSaveDones(std::deque<InboundSaveDone>& out) {
         EnterCriticalSection(&cs_); out.swap(saveDone_); LeaveCriticalSection(&cs_);
     }
+    // One transfer's BEGIN/FILE/DONE taken together under ONE lock. Drained one
+    // queue at a time, the net thread can append the last FILE chunks and the
+    // DONE between the FILE drain and the DONE drain; the DONE then verifies an
+    // incomplete folder (badCrc) and the late chunks land after the staging is
+    // gone. Same fix as KenshiCoop4up REPLICATION_PITFALLS #19.
+    void drainSaveTransfer(std::deque<InboundSaveBegin>& begins,
+                           std::deque<InboundSaveFile>& files,
+                           std::deque<InboundSaveDone>& dones) {
+        EnterCriticalSection(&cs_);
+        begins.swap(saveBegin_);
+        files.swap(saveFile_);
+        dones.swap(saveDone_);
+        LeaveCriticalSection(&cs_);
+    }
     void drainSaveAcks(std::deque<InboundSaveAck>& out) {
         EnterCriticalSection(&cs_); out.swap(saveAck_); LeaveCriticalSection(&cs_);
     }

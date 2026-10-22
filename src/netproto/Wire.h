@@ -25,7 +25,7 @@ typedef double         f64;
 // this header stays a definition file. When you bump PROTOCOL_VERSION, add the
 // matching entry at the bottom of that doc. The version is checked at handshake
 // and a mismatch is rejected (no back-compat).
-const u16 PROTOCOL_VERSION = 56;
+const u16 PROTOCOL_VERSION = 57;
 
 // Packet type tags (first byte of every packet).
 enum PacketType {
@@ -77,7 +77,8 @@ enum PacketType {
     PKT_MONEY_DELTA      = 46,// RELIABLE join money-pool delta (join -> host, protocol 52); MoneyDeltaPacket
     PKT_DEED             = 47,// RELIABLE property-ownership row (protocol 54); DeedPacket
     PKT_FIXTURE          = 48,// RELIABLE runtime-fixture identity row (protocol 55); FixturePacket
-    PKT_PERMS            = 49 // RELIABLE host's join-permission settings (protocol 56); PermsPacket
+    PKT_PERMS            = 49,// RELIABLE host's join-permission settings (protocol 56); PermsPacket
+    PKT_PEER_LEFT        = 50 // RELIABLE another player left (host -> joins, protocol 57); PeerLeftPacket
 };
 
 // One-shot transition events carried on the RELIABLE channel. Continuous state
@@ -1596,6 +1597,16 @@ struct PermsPacket {
     u8  joinBuild;
     u8  joinContainers;
     u8  joinBuy;
+};
+
+// Protocol 57 (three players): the host tells the remaining joins that one join
+// has left, so each can clear the bodies, proxies and items that player authored
+// (a join only ever sees the host disconnect itself). playerId is the leaver's
+// WELCOME id. Host -> joins only. Join-authored state from the OTHER joins
+// reaches a join by the host relaying it verbatim, author ownerId intact.
+struct PeerLeftPacket {
+    u8  type;           // = PKT_PEER_LEFT
+    u32 playerId;       // the join that left
 };
 
 #pragma pack(pop)

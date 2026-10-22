@@ -12,9 +12,10 @@
 // via enet_set_socket_hooks() (patch 0002), so every ENet datagram rides one
 // unreliable Steam P2P packet on channel 0. UDP stays the default transport.
 //
-// Two-player assumption (mirrors NetLink): ONE tunnel peer, configured up front
-// with the other player's steamid64 (two-code exchange; sending to a SteamID
-// implicitly accepts its inbound session, so no Steam callback plumbing needed).
+// Peers (protocol 57): a JOIN has one tunnel peer, the host, configured up front
+// with its steamid64. A HOST in open mode (setOpenHost) admits every player whose
+// inbound session Steam accepted, each behind its own fabricated ENet address, so
+// several joins share the one tunnel; a configured peer simply takes slot 0.
 //
 // Threading: init()/setPeer()/setPingPeer() are called on the main thread before
 // the net thread launches; the ENet hooks and tick() run on the net thread. The
@@ -38,6 +39,10 @@ SteamId selfId();
 // Configure the single tunnel peer. Proactively accepts its inbound session
 // and allows Valve-relay fallback. Call before the net thread starts.
 void setPeer(SteamId id);
+
+// Host: admit any sender whose session was accepted (several joins). Call before
+// the net thread starts.
+void setOpenHost(bool open);
 
 // Accept an inbound P2P session from a specific SteamID. Used by the Steam
 // invite layer's P2PSessionRequest_t callback so a session opens even if the

@@ -151,6 +151,9 @@ DWORD&       g_gameStartTick   = g_session.gameStartTick;
 bool&        g_autoLoadDone    = g_session.autoLoadDone;
 DWORD&       g_titleFirstTick  = g_session.titleFirstTick;
 bool&        g_peerPresent     = g_session.peerPresent;
+// Who is connected (protocol 57): the host tracks each join's id, a join holds
+// the host (0). g_peerPresent stays the "anyone there" summary.
+std::set<coop::u32> g_peers;
 std::string& g_savePending     = g_session.savePending;
 coop::u32&   g_saveReqId       = g_session.saveReqId;
 bool&        g_bootstrapArmed  = g_session.bootstrapArmed;
@@ -342,6 +345,7 @@ void warnIfNoPortraits(const std::string& name) {
 // into the next save. Falls back to a plain map reset if no world has ticked yet.
 void sessionResetForUi() {
     g_peerPresent = false;
+    g_peers.clear();
     if (g_lastGw) g_repl.clearPeerReplicationState(g_lastGw);
     else          g_repl.resetSession();
     g_inbound.flushWorldState();
@@ -400,7 +404,23 @@ void processNetEvents(GameWorld* gw) {
         // per-channel safety resends (or never minting a pre-connect build).
         if (g_cfg.latejoinSync) g_repl.onPeerConnected(g_net, g_net.localId());
         else coopLog("[latejoin] connect edge seen, resync OFF (gate)");
+        g_peers.insert(*it);
         g_peerPresent = true;
+        // A join's squad tab is its player id (protocol 57: join 1 -> tab 1,
+        // join 2 -> tab 2), known only once the host's WELCOME arrives.
+        if (!g_cfg.isHost && !g_cfg.ownRanksFromEnv && g_net.localId() != 0) {
+            std::set<unsigned int> r;
+            r.insert((unsigned int)g_net.localId());
+            if (r != g_cfg.ownRanks) {
+                g_cfg.ownRanks = r;
+                g_repl.setOwnRanks(r);
+                char rb[96];
+                _snprintf(rb, sizeof(rb) - 1, "[coop] player id %u -> own squad tab %u",
+                          (unsigned)g_net.localId(), (unsigned)g_net.localId());
+                rb[sizeof(rb) - 1] = '\0';
+                coopLog(rb);
+            }
+        }
         g_permDirty = true; // host: send the join-permission set now (protocol 56)
         // Coordinated save (protocol 31): while connected under save-sync,
         // the JOIN never writes a save locally - the host's save is
@@ -425,15 +445,20 @@ void processNetEvents(GameWorld* gw) {
         // the departed peer's stream will never author its drop/exit edges -
         // release any carry or occupancy its driven copies still hold.
         if (gw && (g_cfg.carrySync || g_cfg.furnSync)) g_repl.sweepCarries(gw);
-        g_peerPresent = false;
+        if (*it == coop::OWNER_ID_ALL) g_peers.clear();
+        else                           g_peers.erase(*it);
+        g_peerPresent = !g_peers.empty();
+        // On a join, only the HOST going away (OWNER_ID_ALL) ends the session;
+        // another join leaving (PKT_PEER_LEFT, protocol 57) does not.
+        bool hostGone = !g_cfg.isHost && *it == coop::OWNER_ID_ALL;
         // Join alone again: the host's restrictions no longer apply, and a new
         // host session numbers its permission sets from 1.
-        if (!g_cfg.isHost) {
+        if (hostGone) {
             coop::engine::setJoinPermissions(true, true, true);
             g_permSeenSeq = 0;
         }
         // Coordinated save: disconnected = solo again; local saves must work.
-        if (!g_cfg.isHost && g_cfg.saveSync) {
+        if (hostGone && g_cfg.saveSync) {
             coop::engine::setSaveSuppress(false);
             coopLog("[save] JOIN save suppression OFF (peer left)");
         }
@@ -458,21 +483,21 @@ void processNetEvents(GameWorld* gw) {
 // being copy-pasted into both. Emits no log line, so the oracle log contract is
 // unaffected by the extraction.
 void pumpSaveReceive() {
+    // All three at once, so a DONE is never verified ahead of FILE chunks that
+    // arrived before it (see Inbound::drainSaveTransfer).
     std::deque<coop::InboundSaveBegin> begins;
-    g_inbound.drainSaveBegins(begins);
+    std::deque<coop::InboundSaveFile> chunks;
+    std::deque<coop::InboundSaveDone> dones;
+    g_inbound.drainSaveTransfer(begins, chunks, dones);
     for (std::deque<coop::InboundSaveBegin>::iterator it = begins.begin();
          it != begins.end(); ++it)
         coop::savexfer::onSaveBegin(it->pkt);
 
-    std::deque<coop::InboundSaveFile> chunks;
-    g_inbound.drainSaveFiles(chunks);
     for (std::deque<coop::InboundSaveFile>::iterator it = chunks.begin();
          it != chunks.end(); ++it)
         coop::savexfer::onSaveFile(it->hdr, it->path.c_str(),
                                    it->data.empty() ? 0 : &it->data[0]);
 
-    std::deque<coop::InboundSaveDone> dones;
-    g_inbound.drainSaveDones(dones);
     for (std::deque<coop::InboundSaveDone>::iterator it = dones.begin();
          it != dones.end(); ++it) {
         coop::u16 files = 0;
@@ -1948,14 +1973,18 @@ void startNetworking() {
     // ENet protocol unchanged. Requires the partner's steamid64; falls back to
     // UDP loudly when Steam is unavailable so a misconfigured session still
     // behaves like the stock build instead of silently doing nothing.
+    // A HOST needs no peer id (protocol 57): it admits every player whose Steam
+    // session is accepted, so several joins can connect; a pasted id only
+    // pre-accepts that one. A JOIN needs the host's id.
     if (g_cfg.transport == "steam") {
-        if (g_cfg.steamPeer == 0) {
+        if (!g_cfg.isHost && g_cfg.steamPeer == 0) {
             coopErr("[steam] KENSHICOOP_TRANSPORT=steam requires KENSHICOOP_STEAM_PEER=<partner steamid64>; falling back to UDP");
         } else if (!coop::steamp2p::init()) {
             coopErr("[steam] init failed (Steam not running / offline?); falling back to UDP");
         } else {
             coop::steamp2p::setPeer(g_cfg.steamPeer);
-            g_net.setSteamTransport(g_cfg.steamPeer);
+            coop::steamp2p::setOpenHost(g_cfg.isHost);
+            g_net.setSteamTransport(g_cfg.steamPeer, g_cfg.isHost);
             coopLog("[steam] transport=steam armed (connect by SteamID; no port forwarding)");
         }
     }

@@ -120,6 +120,7 @@ static void testSizes() {
     CHECK_EQ("sizeof(DeedPacket)",              sizeof(DeedPacket),              78); // v54: deeds
     CHECK_EQ("sizeof(FixturePacket)",           sizeof(FixturePacket),           90); // v55: fixture identity
     CHECK_EQ("sizeof(PermsPacket)",             sizeof(PermsPacket),             8);  // v56: join permissions
+    CHECK_EQ("sizeof(PeerLeftPacket)",          sizeof(PeerLeftPacket),          5);  // v57: three players
     CHECK_EQ("sizeof(CamHintPacket)",           sizeof(CamHintPacket),           17); // v43: camera hint
     CHECK_EQ("sizeof(CellClaimPacket)",         sizeof(CellClaimPacket),         21); // v49: cell claim
     CHECK_EQ("sizeof(InvXferAckPacket)",        sizeof(InvXferAckPacket),        18); // v50: transfer verdict
@@ -312,8 +313,8 @@ static void testSizes() {
     CHECK_EQ("EVT_SQUAD_MOVE id", (int)EVT_SQUAD_MOVE, 11);
     CHECK("EVT_SQUAD_MOVE distinct", EVT_SQUAD_MOVE != EVT_RECRUIT &&
           EVT_SQUAD_MOVE != EVT_NONE && EVT_SQUAD_MOVE != EVT_EXIT_FURNITURE);
-    CHECK_EQ("PROTOCOL_VERSION (v56: host settings for the join)",
-             (int)PROTOCOL_VERSION, 56);
+    CHECK_EQ("PROTOCOL_VERSION (v57: three players - relay + peer-left)",
+             (int)PROTOCOL_VERSION, 57);
 
     // Protocol 52: the shared money pool. The two players spend from ONE wallet,
     // so the join reports CHANGES and the host the authoritative TOTAL - swap
@@ -498,6 +499,7 @@ static void testRoundTrips() {
     roundTrip<DeedPacket>("DeedPacket", (u8)PKT_DEED);
     roundTrip<FixturePacket>("FixturePacket", (u8)PKT_FIXTURE);
     roundTrip<PermsPacket>("PermsPacket", (u8)PKT_PERMS);
+    roundTrip<PeerLeftPacket>("PeerLeftPacket", (u8)PKT_PEER_LEFT);
     roundTrip<CellClaimPacket>("CellClaimPacket", (u8)PKT_CELL_CLAIM);
     roundTrip<InvXferAckPacket>("InvXferAckPacket", (u8)PKT_INV_XFER_ACK);
 

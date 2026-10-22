@@ -205,7 +205,9 @@ public:
     // reconnect logic are unchanged - only the datagram pipe differs (ENet socket
     // hooks installed on the net thread; MTU clamped to Steam's 1200-byte
     // unreliable ceiling). Must be called before startHost/startClient. 0 = UDP.
-    void setSteamTransport(unsigned long long peerSteamId);
+    // hostOpen (protocol 57): a host admits every player whose Steam session was
+    // accepted, so it needs no peer id and can take several joins.
+    void setSteamTransport(unsigned long long peerSteamId, bool hostOpen = false);
 
     // MAIN thread: advance this peer's session epoch (protocol 44). Called on
     // every session-reset edge (coordinated world reload, connect/disconnect
@@ -371,6 +373,12 @@ private:
     // Steam P2P transport (set before launch; read-only on the net thread
     // thereafter). 0 = stock UDP transport.
     unsigned long long steamPeer_;
+    bool               steamOpen_;
+    // Host: packets forwarded to other joins (protocol 57), net thread only.
+    unsigned long      relayed_;
+    // Player ids are 1..MAX_PLAYER_ID-1 (the join's squad-tab rank); ENet's peer
+    // cap (8) leaves room for 7 joins.
+    static const u32   MAX_PLAYER_ID = 8;
 
     // WAN sim config (set before launch; read-only on the net thread thereafter).
     unsigned int  simDelayMs_;
