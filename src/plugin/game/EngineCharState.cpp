@@ -725,6 +725,23 @@ bool consumeSpeedIntent(GameWorld* gw, float* mult, bool* paused) {
         b[sizeof(b) - 1] = '\0'; coop::logLine(b);
     }
     if (!engineDiff && !btnDiff) return false;
+    // Multiplayer: a pause flip nobody asked for (a trade or dialogue window)
+    // is not a vote. Keep the multiplier part of the change, drop the pause.
+    if (g_mpPauseRules && !pauseKeyRecent()) {
+        bool multMoved = (!ep && em > 0.0f && fabsf(em - g_quietMult) > 0.01f);
+        int newIdx = -1;
+        if (btnDiff)
+            for (int i = 0; i < nBtn; ++i)
+                if (btn[i] == '1' && g_voteBtn[i] != '1') { newIdx = i; break; }
+        if (multMoved || newIdx > 0) {
+            *paused = false;
+            *mult   = multMoved ? em : ((em > 0.0f) ? em : g_speedIntentMult);
+            g_quietHave = true; g_quietMult = *mult;
+            snapshotVoteButtons();
+            return true;
+        }
+        return false;
+    }
     if (engineDiff) {
         // Which multiplier is the request? A moved engine mult = the user
         // picked a new speed. A pause-only flip (space bar) PRESERVES the

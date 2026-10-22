@@ -2322,8 +2322,11 @@ void Replicator::syncSpeed(GameWorld* gw, Inbound& in, NetLink& net, u32 ownerId
         // Arbitrate: effective = min(my request, peer request), capped at 1x
         // while either player squad fights. The cap never force-unpauses -
         // pause (0) is already below 1, so min semantics preserve it.
+        // The HOST alone decides speed and pause (2026-10-23, players' choice):
+        // a join's request no longer lowers the effective - with three players
+        // the single peer slot also let the last request win. Joins still
+        // report combat, which caps the speed at 1x.
         float eff = (speedMyReq_ >= 0.0f) ? speedMyReq_ : 1.0f;
-        if (speedPeerReq_ >= 0.0f && speedPeerReq_ < eff) eff = speedPeerReq_;
         bool combat = speedMyCombat_ || speedPeerCombat_;
         if (combat && speedCombatCap_ && eff > 1.0f) eff = 1.0f;
         bool changed = (speedLastSet_ < 0.0f || fabs(eff - speedLastSet_) > EPS);

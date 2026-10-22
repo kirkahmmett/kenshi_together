@@ -52,7 +52,13 @@ OYNAMA
     ona verir ya da onun için yeni bir karakter ve sekme açar. Aynı oyuncu bir
     dahaki girişinde aynı sekmeye döner.
   * Kaydı HOST alır; join'in kendi kayıtları kapalıdır.
-  * Çıkmak için: join "Leave session", host "Stop hosting".
+  * Çıkmak için: join "Leave session", host "Stop hosting". Çıkan oyuncunun
+    karakterleri dünyada "İsim (away)" olarak bekler: yerinden kıpırdamaz ve yakın
+    dövüş hasarı almaz; oyuncu dönünce kaldığı yerden devam eder.
+  * Oyunu SADECE host durdurur (Space ya da paneldeki "Pause game") ve hızı
+    host seçer. Market/diyalog pencereleri artık oyunu herkes için durdurmaz.
+  * Başka oyuncunun karakterinden eşya ALINAMAZ, ama VERİLEBİLİR. Host isterse
+    Host settings > "Players may take from each other" ile açabilir.
   * Eski ayarlar (Role/Transport/Steam ID kopyala-yapıştır, LAN) panelin
     altındaki "Advanced (IP / Steam ID)" içindedir.
   * Host, panelden join'in inşaat / depo / satın alma izinlerini açıp kapatabilir.

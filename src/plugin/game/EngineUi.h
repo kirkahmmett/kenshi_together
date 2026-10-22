@@ -75,6 +75,7 @@ struct CoopPanelState {
     // switches while the panel is armed as HOST; a press calls onPermToggle
     // (0 build, 1 storage containers, 2 buying). Null callback = rows hidden.
     bool               permBuild, permContainers, permBuy;
+    bool               permTake;   // v58: players may take from each other (onPermToggle(3))
     void               (*onPermToggle)(int which);
     // Simple view: in a loaded game (hosting needs a world), and the session's
     // players as one display line ("Ali (host), Veli"; null/"" = unknown).
@@ -84,6 +85,9 @@ struct CoopPanelState {
     // friends by itself. The panel shows it as a switch.
     bool               autoHost;
     void               (*onAutoHostToggle)();
+    // Host: game paused for everyone, and the button that toggles it.
+    bool               gamePaused;
+    void               (*onPauseToggle)();
 };
 // The panel's role/transport selections at the moment Connect is hit. peerId is the
 // Steam ID pasted in-panel this session (0 if none), and overrides the config

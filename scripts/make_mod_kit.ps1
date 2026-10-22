@@ -31,7 +31,7 @@ param(
     [switch]$SkipBuild,
     # Release version shown in README/PROVENANCE and in the zip name
     # (major.PROTOCOL.patch: a new protocol bumps the middle number).
-    [string]$Version = "0.57.1",
+    [string]$Version = "0.58.0",
     # Where to find KenshiCoop.mod / RE_Kenshi.json if they aren't in dist\mods.
     [string]$HostDir = "C:\Program Files (x86)\Steam\steamapps\common\Kenshi"
 )
@@ -174,7 +174,15 @@ PLAY
   game start works: a player without a tab gets a free one or a new character
   of their own, and gets the same tab back next time.
   The host's save is the shared save: only the host saves.
-  Leave with "Leave session" (join) or "Stop hosting" (host).
+  Leave with "Leave session" (join) or "Stop hosting" (host). A player who
+  leaves keeps their squad in the world as "<name> (away)": it stands still and
+  takes no melee damage until they come back.
+
+  Only the HOST pauses (Space, or "Pause game" in the panel) and picks the game
+  speed; trade and dialogue windows no longer stop the game for everyone.
+  Players can give items to each other but not take from another player's
+  characters, unless the host turns on "Players may take from each other"
+  (panel > Host settings).
 
   The old screens (role / transport / Steam ID copy-paste, LAN) are under
   "Advanced (IP / Steam ID)" at the bottom of the panel.

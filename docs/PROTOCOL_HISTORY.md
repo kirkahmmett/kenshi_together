@@ -40,3 +40,16 @@ build** after a bump.
   (no pasted id needed); each gets its own fake ENet address in the tunnel.
 - Not on the wire: save receive drains BEGIN/FILE/DONE atomically; players can no
   longer drop items from another player's character.
+
+## 58 - players may not take from each other (host switch)
+
+- `PermsPacket` gains `takeFromPlayers` (9 bytes). Off by default in a real
+  session: a player can give items to another player's character but not take
+  any out of it (the take is refused at the inventory-add detour and the item
+  goes back). The host's "Players may take from each other" switch turns it on.
+  Scripted tests keep trading free unless `KENSHICOOP_PLAYERS_TAKE=0`.
+- Not on the wire: only the host decides speed and pause (a join's request no
+  longer lowers the effective), and trade/dialogue windows no longer pause the
+  game for everyone - only Space or the panel's Pause button counts. A player
+  who leaves becomes "<name> (away)": frozen and protected from melee damage
+  until they return.

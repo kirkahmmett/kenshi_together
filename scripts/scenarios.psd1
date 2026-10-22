@@ -1517,6 +1517,16 @@
         # permissions packet is always sent, and the join acts on its own world.
         # drop_peer_refused (protocol 57): a join cannot drop items from the
         # host's character (that would duplicate them) but can from its own.
+        # take_refused (protocol 58): players cannot take items out of another
+        # player's character (the rule is forced on for this test); giving works.
+        take_refused = @{
+            DiagEnv = @{ KENSHICOOP_INV_SYNC = '1'; KENSHICOOP_PLAYERS_TAKE = '0' }
+            Save = 'squad1'; Setup = ''; Tolerance = 3.0
+            PrimaryGate = 'take_refused'
+            Gating   = @('take_refused')
+            Advisory = @()
+            Tier = 'full'; WanVariant = $false
+        }
         drop_peer_refused = @{
             DiagEnv = @{ KENSHICOOP_INV_SYNC = '1'; KENSHICOOP_WORLD_SYNC = '1' }
             Save = 'squad1'; Setup = ''; Tolerance = 3.0

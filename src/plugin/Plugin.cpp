@@ -246,6 +246,7 @@ inline unsigned __int64 perfNow() {
 // connect, on change and every PERM_RESEND_MS. Join: applies the newest set it
 // received and tells the player for a few seconds when an action was refused.
 bool          g_permBuild = true, g_permContainers = true, g_permBuy = true;
+bool          g_permTake = false; // v58: players may take from each other (host switch)
 coop::u32     g_permSeq = 0;
 bool          g_permDirty = true;
 DWORD         g_permSentTick = 0;
@@ -296,18 +297,37 @@ const DWORD   NAMES_APPLY_MS   = 2000;
 const DWORD   PERM_NOTICE_MS = 5000;
 
 void onPermToggle(int which) {
-    bool* f = (which == 0) ? &g_permBuild : (which == 1) ? &g_permContainers : &g_permBuy;
+    bool* f = (which == 0) ? &g_permBuild : (which == 1) ? &g_permContainers :
+              (which == 2) ? &g_permBuy : &g_permTake;
     *f = !*f;
     g_permDirty = true;
     char b[112];
     _snprintf(b, sizeof(b) - 1, "[perm] host set join %s = %s",
-              which == 0 ? "build" : which == 1 ? "containers" : "buy", *f ? "ON" : "OFF");
+              which == 0 ? "build" : which == 1 ? "containers" : which == 2 ? "buy" : "take",
+              *f ? "ON" : "OFF");
     b[sizeof(b) - 1] = '\0';
     coopLog(b);
 }
 
+// What the joins are told (the same rule the host applies to itself).
+bool allowTakeForJoins() {
+    char e[4];
+    DWORD n2 = GetEnvironmentVariableA("KENSHICOOP_PLAYERS_TAKE", e, sizeof(e));
+    if (n2 > 0 && n2 < sizeof(e)) return e[0] != '0';
+    return g_permTake || !(g_cfg.scenario.empty() && g_cfg.testSeconds == 0);
+}
+
 void tickPermissions() {
+    // Refusals on ANY client (the take rule applies to the host too).
+    unsigned int rs0 = coop::engine::permRefusalSeq();
+    if (rs0 != g_permRefusalSeen) {
+        g_permRefusalSeen = rs0;
+        g_permNoticeKind = coop::engine::permRefusalKind();
+        g_permNoticeTick = GetTickCount();
+    }
     if (g_cfg.isHost) {
+        // The host follows its own take rule, while anyone is connected.
+        coop::engine::setTakeFromPlayers(allowTakeForJoins() || !g_peerPresent);
         DWORD now = GetTickCount();
         if (g_peerPresent && g_net.isRunning() &&
             (g_permDirty || now - g_permSentTick >= PERM_RESEND_MS)) {
@@ -317,6 +337,7 @@ void tickPermissions() {
             p.joinBuild = g_permBuild ? 1 : 0;
             p.joinContainers = g_permContainers ? 1 : 0;
             p.joinBuy = g_permBuy ? 1 : 0;
+            p.takeFromPlayers = allowTakeForJoins() ? 1 : 0;
             g_net.queuePerms(p);
             g_permDirty = false;
             g_permSentTick = now;
@@ -330,12 +351,7 @@ void tickPermissions() {
         g_permSeenSeq = it->pkt.seq;
         coop::engine::setJoinPermissions(it->pkt.joinBuild != 0, it->pkt.joinContainers != 0,
                                          it->pkt.joinBuy != 0);
-    }
-    unsigned int rs = coop::engine::permRefusalSeq();
-    if (rs != g_permRefusalSeen) {
-        g_permRefusalSeen = rs;
-        g_permNoticeKind = coop::engine::permRefusalKind();
-        g_permNoticeTick = GetTickCount();
+        coop::engine::setTakeFromPlayers(it->pkt.takeFromPlayers != 0);
     }
 }
 
@@ -423,6 +439,89 @@ std::set<std::string> connectedJoinNames() {
     return out;
 }
 
+// ---- Away mode (2026-10-23) --------------------------------------------------
+// A player who leaves keeps their characters in the world, but safely: the host
+// renames their tab "<name> (away)", and while a tab carries that suffix its
+// members neither think (AI suspended - they stand where they are) nor take
+// melee damage. The suffix rides in the save, so a later session keeps them
+// safe; when the player rejoins, assignSquads drops the suffix and hands the
+// tab back.
+const char* AWAY_SUFFIX = " (away)";
+std::vector<std::vector<unsigned int> > g_awayHands; // members of away tabs
+DWORD g_awayScanTick = 0;
+
+bool isAwayName(const std::string& n) {
+    size_t k = strlen(AWAY_SUFFIX);
+    return n.size() > k && n.compare(n.size() - k, k, AWAY_SUFFIX) == 0;
+}
+
+// Host leave edge: mark the leaver's tab away.
+void markAway(GameWorld* gw, coop::u32 id) {
+    if (!g_cfg.isHost || !realSession() || !gw || !coop::engine::gameplayLive(gw)) return;
+    std::map<coop::u32, std::string>::const_iterator nm = g_names.find(id);
+    if (nm == g_names.end() || nm->second.empty()) return;
+    std::vector<SquadTab> tabs;
+    listSquadTabs(gw, tabs);
+    for (size_t t = 0; t < tabs.size(); ++t) {
+        if (tabs[t].name != nm->second) continue;
+        std::string away = nm->second + AWAY_SUFFIX;
+        if (coop::engine::setSquadNameByHand(tabs[t].hand, away.c_str()) == 1) {
+            coop::engine::refreshSquadTabs();
+            char b[160];
+            _snprintf(b, sizeof(b) - 1, "[away] '%s' left: their squad waits, frozen and protected",
+                      nm->second.c_str());
+            b[sizeof(b) - 1] = '\0';
+            coopLog(b);
+        }
+        g_awayScanTick = 0; // rescan now
+        return;
+    }
+}
+
+// Host, every tick after the replicator rebuilt its suspend/guard sets.
+void applyAwayGuards(GameWorld* gw) {
+    if (!g_cfg.isHost || !gw) return;
+    DWORD now = GetTickCount();
+    if (g_awayScanTick == 0 || now - g_awayScanTick >= 1000) {
+        g_awayScanTick = now;
+        g_awayHands.clear();
+        std::vector<SquadTab> tabs;
+        listSquadTabs(gw, tabs);
+        std::set<std::pair<coop::u32, coop::u32> > awayTabs;
+        for (size_t t = 0; t < tabs.size(); ++t)
+            if (isAwayName(tabs[t].name)) awayTabs.insert(tabs[t].key);
+        if (!awayTabs.empty()) {
+            coop::EntityState sq[64];
+            unsigned int n = coop::engine::captureSquad(gw, /*leaderOnly*/ false, sq, 64);
+            for (unsigned int i = 0; i < n; ++i) {
+                if (!awayTabs.count(std::make_pair(sq[i].hContainer, sq[i].hContainerSerial)))
+                    continue;
+                std::vector<unsigned int> h(5);
+                h[0] = sq[i].hType; h[1] = sq[i].hContainer; h[2] = sq[i].hContainerSerial;
+                h[3] = sq[i].hIndex; h[4] = sq[i].hSerial;
+                g_awayHands.push_back(h);
+            }
+        }
+    }
+    unsigned int guarded = 0;
+    for (size_t i = 0; i < g_awayHands.size(); ++i) {
+        const std::vector<unsigned int>& h = g_awayHands[i];
+        Character* c = coop::engine::resolveCharByHand(h[3], h[4], h[0], h[1], h[2]);
+        if (!c) continue;
+        coop::engine::addAiSuspend(c);
+        coop::engine::addDamageGuard(c);
+        ++guarded;
+    }
+    static unsigned int s_lastGuarded = 0;
+    if (guarded != s_lastGuarded) {
+        s_lastGuarded = guarded;
+        char b[80];
+        _snprintf(b, sizeof(b) - 1, "[away] guarding %u character(s)", guarded);
+        b[sizeof(b) - 1] = '\0';
+        coopLog(b);
+    }
+}
+
 // HOST, before the world is sent to a join: every connected player gets a
 // squad tab named after them - the one already carrying their name, else an
 // unnamed one ("NAMELESS_n", a co-op start's spare), else a new character in a
@@ -448,6 +547,20 @@ bool assignSquads(GameWorld* gw) {
     }
     for (std::set<std::string>::const_iterator j = joins.begin(); j != joins.end(); ++j) {
         if (taken.count(*j)) continue;
+        // Back from being away: the tab kept their name with " (away)".
+        int away = -1;
+        for (size_t t = 0; t < tabs.size() && away < 0; ++t)
+            if (tabs[t].name == *j + AWAY_SUFFIX) away = (int)t;
+        if (away >= 0 && coop::engine::setSquadNameByHand(tabs[away].hand, j->c_str()) == 1) {
+            char rb[160];
+            _snprintf(rb, sizeof(rb) - 1, "[away] '%s' is back", j->c_str());
+            rb[sizeof(rb) - 1] = '\0';
+            coopLog(rb);
+            tabs[away].name = *j;
+            taken.insert(*j);
+            changed = true;
+            continue;
+        }
         int pick = -1;
         for (size_t t = 1; t < tabs.size() && pick < 0; ++t) {
             const std::string& nm = tabs[t].name;
@@ -680,6 +793,7 @@ void processNetEvents(GameWorld* gw) {
         _snprintf(b, sizeof(b) - 1, "handshake: peer left id=%u", (unsigned)*it);
         b[sizeof(b) - 1] = '\0';
         coopLog(b);
+        if (g_cfg.isHost && *it != coop::OWNER_ID_ALL) markAway(gw, *it);
         // Carried-body sync (protocol 18) + furniture occupancy (protocol 19):
         // the departed peer's stream will never author its drop/exit edges -
         // release any carry or occupancy its driven copies still hold.
@@ -694,6 +808,7 @@ void processNetEvents(GameWorld* gw) {
         // host session numbers its permission sets from 1.
         if (hostGone) {
             coop::engine::setJoinPermissions(true, true, true);
+            coop::engine::setTakeFromPlayers(true);
             g_permSeenSeq = 0;
         }
         // Coordinated save: disconnected = solo again; local saves must work.
@@ -1170,12 +1285,14 @@ void coopPanelDrive() {
         ostate = 0;
     }
     // Join: an action the host's settings refused just now says why.
-    if (!g_cfg.isHost && g_permNoticeTick != 0 &&
-        GetTickCount() - g_permNoticeTick < PERM_NOTICE_MS) {
-        detail = std::string("The host has turned off ") +
-                 (g_permNoticeKind == 1 ? "building" :
-                  g_permNoticeKind == 2 ? "storage containers" : "buying") +
-                 " for joins";
+    if (g_permNoticeTick != 0 && GetTickCount() - g_permNoticeTick < PERM_NOTICE_MS) {
+        if (g_permNoticeKind == 4)
+            detail = "You can only take items from your own characters";
+        else if (!g_cfg.isHost)
+            detail = std::string("The host has turned off ") +
+                     (g_permNoticeKind == 1 ? "building" :
+                      g_permNoticeKind == 2 ? "storage containers" : "buying") +
+                     " for joins";
         ostate = 1;
     }
     ps.detail = detail.c_str();
@@ -1221,6 +1338,7 @@ void coopPanelDrive() {
     ps.panelVk = g_cfg.panelKeyVk;
     ps.lastError = lastErr.c_str();
     ps.permBuild = g_permBuild; ps.permContainers = g_permContainers; ps.permBuy = g_permBuy;
+    ps.permTake = g_permTake;
     ps.onPermToggle = &onPermToggle;
     // Simple view: hosting needs a loaded world; players by Steam name.
     ps.inGame = g_gameStarted;
@@ -1247,6 +1365,15 @@ void coopPanelDrive() {
     loadPrefs();
     ps.autoHost = g_autoHost;
     ps.onAutoHostToggle = &onAutoHostToggle;
+    // Only the host pauses, and only on purpose (Space / panel button);
+    // trade and dialogue windows no longer stop the game for everyone.
+    coop::engine::setMultiplayerPauseRules(g_net.isRunning());
+    coop::engine::notePauseKey();
+    {
+        float m = 0.0f; bool p = false;
+        ps.gamePaused = g_lastGw && coop::engine::readGameSpeed(g_lastGw, &m, &p) && p;
+    }
+    ps.onPauseToggle = g_cfg.isHost ? &coop::engine::requestPauseToggle : 0;
     // Always host: once per loaded game, while offline and not on a scenario.
     if (!g_gameStarted) g_autoHostDone = false;
     if (g_autoHost && g_gameStarted && !g_autoHostDone && !g_net.isRunning()) {
@@ -1763,6 +1890,7 @@ void trackMove(GameWorld* gw);   // KENSHICOOP_TRACK_MOVE route recorder (below)
 void tickReplicateApply(GameWorld* gw, bool worldLive) {
     if (worldLive && coop::engine::gameplayLive(gw)) {
         KC_PERF(S_APPLY_TARGETS, g_repl.applyTargets(gw));
+        applyAwayGuards(gw); // after applyTargets rebuilt the suspend/guard sets
         // Phase W2: relocate our own copy of any DROPPED weapon to the ground BEFORE the
         // inventory reconcile runs, so the conservation move beats the (debounced) removal
         // reconcile that would otherwise DESTROY the weapon we cannot refabricate.

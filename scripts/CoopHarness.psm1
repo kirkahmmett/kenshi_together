@@ -50,6 +50,7 @@ $script:CoopDiagEnvKeys = @(
     'KENSHICOOP_JOIN_BUILD'
     'KENSHICOOP_JOIN_CONTAINERS'
     'KENSHICOOP_JOIN_BUY'
+    'KENSHICOOP_PLAYERS_TAKE'
     # --- log-only diagnostic traces (read outside Config; never gate behavior) ---
     'KENSHICOOP_INV_DUMP'
     'KENSHICOOP_DEBUG_SPEED'

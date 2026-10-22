@@ -119,7 +119,7 @@ static void testSizes() {
     CHECK_EQ("sizeof(ResearchPacket)",          sizeof(ResearchPacket),          57); // v37: research
     CHECK_EQ("sizeof(DeedPacket)",              sizeof(DeedPacket),              78); // v54: deeds
     CHECK_EQ("sizeof(FixturePacket)",           sizeof(FixturePacket),           90); // v55: fixture identity
-    CHECK_EQ("sizeof(PermsPacket)",             sizeof(PermsPacket),             8);  // v56: join permissions
+    CHECK_EQ("sizeof(PermsPacket)",             sizeof(PermsPacket),             9);  // v58: + takeFromPlayers
     CHECK_EQ("sizeof(PeerLeftPacket)",          sizeof(PeerLeftPacket),          5);  // v57: three players
     CHECK_EQ("sizeof(RosterPacket)",            sizeof(RosterPacket),            38); // v57: player names
     CHECK_EQ("sizeof(CamHintPacket)",           sizeof(CamHintPacket),           17); // v43: camera hint
@@ -314,8 +314,8 @@ static void testSizes() {
     CHECK_EQ("EVT_SQUAD_MOVE id", (int)EVT_SQUAD_MOVE, 11);
     CHECK("EVT_SQUAD_MOVE distinct", EVT_SQUAD_MOVE != EVT_RECRUIT &&
           EVT_SQUAD_MOVE != EVT_NONE && EVT_SQUAD_MOVE != EVT_EXIT_FURNITURE);
-    CHECK_EQ("PROTOCOL_VERSION (v57: three players - relay + peer-left)",
-             (int)PROTOCOL_VERSION, 57);
+    CHECK_EQ("PROTOCOL_VERSION (v58: take-from-players setting)",
+             (int)PROTOCOL_VERSION, 58);
 
     // Protocol 52: the shared money pool. The two players spend from ONE wallet,
     // so the join reports CHANGES and the host the authoritative TOTAL - swap

@@ -450,6 +450,13 @@ extern bool  g_speedIntentSeeded;
 extern bool  g_quietHave;
 extern float g_quietMult;
 extern bool  g_quietPaused;
+// Multiplayer pause rule (2026-10-23): only a deliberate pause counts - the
+// Space key (seen down within PAUSE_KEY_WINDOW_MS) or the panel's Pause button.
+// Trade/dialogue windows pause the engine on their own; those flips are not a
+// vote and are undone by the speed enforcement.
+extern bool          g_mpPauseRules;
+extern unsigned long g_pauseKeyTick;
+bool pauseKeyRecent();
 extern char g_voteBtn[15];
 extern int  g_voteBtnN;
 // Phase 5 spike (KENSHICOOP_DEBUG_SPEED): combat-cap-active hint, set by

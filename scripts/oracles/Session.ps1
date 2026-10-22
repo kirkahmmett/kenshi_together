@@ -966,3 +966,25 @@ function Test-DropPeerRefused {
     Write-Host "  DROP-PEER-REFUSED $v $detail"
     return (Add-GateResult -Name "drop_peer_refused" -Status $v -Metrics @{} -Detail $detail)
 }
+
+# take_refused (protocol 58): the host cannot take a probe item out of the join's
+# character (both counts unchanged) but can give one of its own. Host DPR-style lines.
+function Test-TakeRefused {
+    param([string]$HostFile, [string]$JoinFile)
+    $why = @()
+    $t = Select-String -Path $HostFile -Pattern 'SCENARIO TAKE take hostBefore=(-?\d+) hostAfter=(-?\d+) joinBefore=(-?\d+) joinAfter=(-?\d+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+    if ($null -eq $t) { $why += "host never tried to take" }
+    else {
+        $g = $t.Matches[0].Groups
+        if ([int]$g[3].Value -le 0) { $why += "the join's leader had no probe item" }
+        if ($g[1].Value -ne $g[2].Value -or $g[3].Value -ne $g[4].Value) { $why += "take changed counts: host $($g[1].Value)->$($g[2].Value), join $($g[3].Value)->$($g[4].Value)" }
+    }
+    $gv = Select-String -Path $HostFile -Pattern 'SCENARIO TAKE give hostBefore=(-?\d+) hostAfter=(-?\d+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+    if ($null -eq $gv) { $why += "host never gave" }
+    elseif ([int]$gv.Matches[0].Groups[2].Value -ne [int]$gv.Matches[0].Groups[1].Value - 1) { $why += "giving did not go through" }
+    if ($null -eq (Select-String -Path $HostFile -Pattern 'REFUSED taking items from another player' -ErrorAction SilentlyContinue | Select-Object -First 1)) { $why += "no refusal logged" }
+    $v = if ($why.Count -eq 0) { "PASS" } else { "FAIL" }
+    $detail = $why -join "; "
+    Write-Host "  TAKE-REFUSED $v $detail"
+    return (Add-GateResult -Name "take_refused" -Status $v -Metrics @{} -Detail $detail)
+}

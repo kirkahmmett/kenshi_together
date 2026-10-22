@@ -752,6 +752,14 @@ void setJoinPermissions(bool build, bool containers, bool buy);
 // name, the "NAMELESS_0" label). A no-op when it already reads `name`.
 // Returns 1 renamed, 0 unchanged, -1 unresolved/fault.
 int setSquadNameByHand(const unsigned int hand[5], const char* name);
+
+// Multiplayer pause rule: while on, only the Space key (call notePauseKey each
+// tick) or requestPauseToggle counts as a pause vote; UI-driven engine pauses
+// (trade, dialogue) are ignored and undone by the speed enforcement.
+void setMultiplayerPauseRules(bool on);
+void notePauseKey();
+// The panel's "Pause / Resume (everyone)" button: a pause vote like Space.
+void requestPauseToggle();
 // The squad-tab name of the character at hand[5] into out ("" on failure).
 // Returns 1 read, -1 unresolved/fault.
 int getSquadNameByHand(const unsigned int hand[5], char* out, unsigned int len);
@@ -761,6 +769,10 @@ int getSquadNameByHand(const unsigned int hand[5], char* out, unsigned int len);
 int createPlayerSquad(GameWorld* gw, const char* name);
 // Refusal counter + the kind of the latest one (1 build, 2 storage, 3 buy), so
 // the plugin can show the player why an action did nothing.
+// Protocol 58: may a player take items OUT of another player's character?
+// Off by default in a session: taking only from your own characters; giving is
+// always allowed. Set on every client from the host's setting.
+void setTakeFromPlayers(bool allowed);
 unsigned int permRefusalSeq();
 int          permRefusalKind();
 

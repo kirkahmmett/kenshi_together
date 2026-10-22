@@ -284,7 +284,7 @@ unsigned long long      g_friendBtnIds[INVITE_ROWS_MAX];
 std::string             g_lastInviteSig;    // rebuild gate for the invite rows
 
 // Host settings for the join (protocol 56): three switches, HOST role only.
-DataPanelLine_Button*   g_permBtns[3]  = { 0, 0, 0 };
+DataPanelLine_Button*   g_permBtns[4]  = { 0, 0, 0, 0 };
 void                  (*g_permToggleFn)(int) = 0;
 int                     g_lastPermSig  = -1; // rebuild gate (bit per switch)
 
@@ -303,6 +303,8 @@ std::string             g_lastSimpleSig;
 unsigned int            g_rebuilds = 0;     // panel rebuilds since the last report
 DWORD                   g_rebuildTick = 0;
 DataPanelLine_Button*   g_hostSetBtn   = 0; // host view: show/hide permission switches
+DataPanelLine_Button*   g_pauseBtn     = 0; // host view: pause / resume everyone
+void                  (*g_pauseToggleFn)() = 0;
 DataPanelLine_Button*   g_autoHostBtn  = 0; // "Always host my games"
 void                  (*g_autoHostToggleFn)() = 0;
 // Main-menu launcher: a small window by Kenshi's own menu, so nobody has to
@@ -370,7 +372,7 @@ void onPasteIdBtn(DataPanelLine*) {
 }
 // One callback for the three permission switches: the line says which.
 void onPermBtn(DataPanelLine* line) {
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         if (g_permBtns[i] && (DataPanelLine*)g_permBtns[i] == line) {
             if (g_permToggleFn) g_permToggleFn(i);
             g_panel.needsRebuild = true;
@@ -395,6 +397,10 @@ void onQuickJoinBtn(DataPanelLine*) {
     g_panel.hostFlag = false; g_panel.steamFlag = true;
     coop::logLine("[coop-ui] quick join");
     g_inviteApi->joinGame(0);
+}
+void onPauseBtn(DataPanelLine*) {
+    if (g_pauseToggleFn) g_pauseToggleFn();
+    g_panel.needsRebuild = true;
 }
 void onHostSetBtn(DataPanelLine*) {
     g_panel.hostSettings = !g_panel.hostSettings;
@@ -524,7 +530,7 @@ void panelBuildSeh(DatapanelGUI* p, const PanelStrings* s) {
         p->addSpace(0, 0.35f);
         // Host settings for the join: three switches, directly under the
         // session toggles because they are part of how the host runs it.
-        for (int i = 0; i < 3; ++i) g_permBtns[i] = 0;
+        for (int i = 0; i < 4; ++i) g_permBtns[i] = 0;
         if (s->permKey[0]) {
             for (int i = 0; i < 3; ++i)
                 g_permBtns[i] = p->setLineButton(*s->permKey[i], *s->permCap[i], 0);
@@ -603,6 +609,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
     g_onConnectFn = onConnect;
     g_onDisconnectFn = onDisconnect;
     g_autoHostToggleFn = st->onAutoHostToggle;
+    g_pauseToggleFn = st->onPauseToggle;
     ForgottenGUI* g = ::gui; // KenshiLib data export (spike 46)
     { static void* s_last = (void*)-1;
       if ((void*)g != s_last) { s_last = (void*)g;
@@ -654,7 +661,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             g_inviteBtn = 0; g_inviteLine = 0;
             for (int i = 0; i < INVITE_ROWS_MAX; ++i) g_friendBtns[i] = 0;
             g_lastInviteSig.clear();
-            for (int i = 0; i < 3; ++i) g_permBtns[i] = 0;
+            for (int i = 0; i < 4; ++i) g_permBtns[i] = 0;
             g_lastPermSig = -1;
             g_hostBtn = 0; g_refreshBtn = 0; g_advBtn = 0; g_simpleBtn = 0; g_leaveBtn = 0;
             g_hostSetBtn = 0; g_autoHostBtn = 0;
@@ -824,8 +831,10 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             }
         }
         if (hostOnline) sig += (st->permBuild ? "B" : "b") + std::string(st->permContainers ? "C" : "c") +
-                               (st->permBuy ? "Y" : "y") + (g_panel.hostSettings ? "S" : "s");
+                               (st->permBuy ? "Y" : "y") + (st->permTake ? "T" : "t") +
+                               (g_panel.hostSettings ? "S" : "s");
         sig += st->autoHost ? "A" : "a";
+        sig += st->gamePaused ? "Z" : "z";
         if (g_panel.needsRebuild || !g_panel.built || sig != g_lastSimpleSig) {
             char titleBuf[64];
             _snprintf(titleBuf, sizeof(titleBuf) - 1, "Co-op    -    F%d to close",
@@ -843,8 +852,8 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             g_hostBtn = 0; g_refreshBtn = 0; g_advBtn = 0; g_leaveBtn = 0;
             for (int i = 0; i < GAME_ROWS_MAX; ++i) g_gameBtns[i] = 0;
             for (int i = 0; i < INVITE_ROWS_MAX; ++i) { g_friendBtns[i] = 0; g_friendBtnIds[i] = 0; }
-            for (int i = 0; i < 3; ++i) g_permBtns[i] = 0;
-            g_inviteBtn = 0; g_hostSetBtn = 0; g_autoHostBtn = 0;
+            for (int i = 0; i < 4; ++i) g_permBtns[i] = 0;
+            g_inviteBtn = 0; g_hostSetBtn = 0; g_autoHostBtn = 0; g_pauseBtn = 0;
 #define ROW(k, kk, vv, o) do { if (n < SIMPLE_ROWS_MAX) { keys[n] = (kk); vals[n] = (vv); \
             rows[n].kind = (k); rows[n].key = &keys[n]; rows[n].val = &vals[n]; \
             rows[n].out = (DataPanelLine**)(o); ++n; } } while (0)
@@ -878,6 +887,10 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                 if (!players.empty()) ROW(0, "Players", "Players: " + players, &infoLines[infoN++]);
                 ROW(2, "", "", 0);
                 if (st->isHost) {
+                    if (g_pauseToggleFn)
+                        ROW(1, "pause", st->gamePaused ? "Resume game (everyone)"
+                                                       : "Pause game (everyone)    - or Space",
+                            &g_pauseBtn);
                     ROW(1, "invite", "Invite a Steam friend", &g_inviteBtn);
                     if (!invStat.empty()) ROW(0, "Invite", "Invite: " + invStat, &infoLines[infoN++]);
                     if (apiOk && g_inviteApi->pickerActive && g_inviteApi->pickerActive()) {
@@ -899,10 +912,12 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                                                             : "Host settings    (show)",
                         &g_hostSetBtn);
                     if (g_panel.hostSettings) {
-                        const char* what[3] = { "Join may build", "Join may use storage", "Join may buy" };
-                        const bool  on[3]   = { st->permBuild, st->permContainers, st->permBuy };
-                        const char* pk[3]   = { "permbuild", "permstore", "permbuy" };
-                        for (int i = 0; i < 3; ++i)
+                        const char* what[4] = { "Join may build", "Join may use storage", "Join may buy",
+                                                "Players may take from each other" };
+                        const bool  on[4]   = { st->permBuild, st->permContainers, st->permBuy,
+                                                st->permTake };
+                        const char* pk[4]   = { "permbuild", "permstore", "permbuy", "permtake" };
+                        for (int i = 0; i < 4; ++i)
                             ROW(1, pk[i], std::string("    ") + what[i] + ": " + (on[i] ? "YES" : "NO") +
                                               "    (switch)", &g_permBtns[i]);
                     }
@@ -921,12 +936,13 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             if (g_leaveBtn)   g_leaveBtn->callback   = MyGUI::newDelegate(&onLeaveBtn);
             if (g_inviteBtn)  g_inviteBtn->callback  = MyGUI::newDelegate(&onInviteBtn);
             if (g_hostSetBtn) g_hostSetBtn->callback = MyGUI::newDelegate(&onHostSetBtn);
+            if (g_pauseBtn)   g_pauseBtn->callback   = MyGUI::newDelegate(&onPauseBtn);
             if (g_autoHostBtn) g_autoHostBtn->callback = MyGUI::newDelegate(&onAutoHostBtn);
             for (int i = 0; i < GAME_ROWS_MAX; ++i)
                 if (g_gameBtns[i]) g_gameBtns[i]->callback = MyGUI::newDelegate(&onGameBtn);
             for (int i = 0; i < INVITE_ROWS_MAX; ++i)
                 if (g_friendBtns[i]) g_friendBtns[i]->callback = MyGUI::newDelegate(&onFriendBtn);
-            for (int i = 0; i < 3; ++i)
+            for (int i = 0; i < 4; ++i)
                 if (g_permBtns[i]) g_permBtns[i]->callback = MyGUI::newDelegate(&onPermBtn);
             dbgColourSeh(statusLine, !transfer.empty() || hasErr);
             for (int i = 0; i < infoN; ++i) dbgColourSeh(infoLines[i], false);

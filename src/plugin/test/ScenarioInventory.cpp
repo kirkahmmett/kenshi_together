@@ -2632,6 +2632,117 @@ private:
     unsigned int ownLeader_[5];
 };
 
+// take_refused (protocol 58): with "players may take from each other" off
+// (KENSHICOOP_PLAYERS_TAKE=0), the HOST - acting as a player through the same
+// remove+add a UI drag performs (moveItemBetweenContainers, suspendVeto=false) -
+// cannot take a probe item out of the JOIN's tab leader, and both counts stay
+// put; giving one of its own to the join still goes through. Each side seeds its
+// own leader at 6 s.
+class TakeRefusedScenario : public TimedScenario {
+public:
+    TakeRefusedScenario()
+        : TimedScenario("take_refused", 0), type_(0), haveHost_(false), haveJoin_(false),
+          seeded_(false), took_(false), gave_(false), takeMoved_(-2), giveMoved_(-2),
+          hBeforeTake_(-1), jBeforeTake_(-1), hAfterTake_(-1), jAfterTake_(-1),
+          hBeforeGive_(-1), hAfterGive_(-1) {
+        sid_[0] = '\0';
+        memset(hostLeader_, 0, sizeof(hostLeader_));
+        memset(joinLeader_, 0, sizeof(joinLeader_));
+    }
+
+    virtual void onStart(const ScenarioContext& ctx) {
+        engine::commonTestItemSid(ctx.gw, sid_, sizeof(sid_), &type_);
+        EntityState sq[32];
+        unsigned int n = engine::captureSquad(ctx.gw, /*leaderOnly*/ false, sq, 32);
+        int h = tabLeaderIdx(sq, n, 0), j = tabLeaderIdx(sq, n, 1);
+        if (h >= 0) { handFromEntity(sq[h], hostLeader_); haveHost_ = true; }
+        if (j >= 0) { handFromEntity(sq[j], joinLeader_); haveJoin_ = true; }
+        char b[160];
+        _snprintf(b, sizeof(b) - 1, "SCENARIO TAKE start host=%d tab0=%d tab1=%d sid='%s'",
+                  ctx.isHost ? 1 : 0, haveHost_ ? 1 : 0, haveJoin_ ? 1 : 0, sid_);
+        b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    }
+
+    virtual bool onTick(const ScenarioContext& ctx) {
+        if (!seeded_ && ctx.elapsedMs >= SEED_MS) {
+            seeded_ = true;
+            const unsigned int* mine = ctx.isHost ? hostLeader_ : joinLeader_;
+            if (ctx.isHost ? haveHost_ : haveJoin_) {
+                char sid[48]; sid[0] = '\0';
+                engine::addTestItemsToContainer(ctx.gw, mine, 3, sid, sizeof(sid));
+            }
+        }
+        if (ctx.isHost && haveHost_ && haveJoin_ && sid_[0]) {
+            if (!took_ && ctx.elapsedMs >= TAKE_MS) {
+                took_ = true;
+                hBeforeTake_ = count(ctx.gw, hostLeader_);
+                jBeforeTake_ = count(ctx.gw, joinLeader_);
+                takeMoved_ = engine::moveItemBetweenContainers(ctx.gw, joinLeader_, hostLeader_,
+                                                               sid_, type_, 1, /*suspendVeto*/ false);
+                hAfterTake_ = count(ctx.gw, hostLeader_);
+                jAfterTake_ = count(ctx.gw, joinLeader_);
+                char b[200];
+                _snprintf(b, sizeof(b) - 1,
+                          "SCENARIO TAKE take hostBefore=%d hostAfter=%d joinBefore=%d joinAfter=%d moved=%d",
+                          hBeforeTake_, hAfterTake_, jBeforeTake_, jAfterTake_, takeMoved_);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+            if (!gave_ && ctx.elapsedMs >= GIVE_MS) {
+                gave_ = true;
+                hBeforeGive_ = count(ctx.gw, hostLeader_);
+                giveMoved_ = engine::moveItemBetweenContainers(ctx.gw, hostLeader_, joinLeader_,
+                                                               sid_, type_, 1, /*suspendVeto*/ false);
+                hAfterGive_ = count(ctx.gw, hostLeader_);
+                char b[160];
+                _snprintf(b, sizeof(b) - 1, "SCENARIO TAKE give hostBefore=%d hostAfter=%d moved=%d",
+                          hBeforeGive_, hAfterGive_, giveMoved_);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+        }
+        if (ctx.elapsedMs >= DURATION_MS) {
+            if (!ctx.isHost) {
+                passed_ = true;
+            } else {
+                bool blockOk = took_ && jBeforeTake_ > 0 && hAfterTake_ == hBeforeTake_ &&
+                               jAfterTake_ == jBeforeTake_;
+                bool giveOk  = gave_ && hBeforeGive_ > 0 && hAfterGive_ == hBeforeGive_ - 1;
+                passed_ = blockOk && giveOk;
+                char b[112];
+                _snprintf(b, sizeof(b) - 1, "SCENARIO TAKE verdict blockOk=%d giveOk=%d",
+                          blockOk ? 1 : 0, giveOk ? 1 : 0);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+            return true;
+        }
+        return false;
+    }
+
+private:
+    int count(GameWorld* gw, const unsigned int h[5]) {
+        InvItemEntry items[INV_ITEMS_MAX];
+        unsigned int hash = 0;
+        unsigned int n = engine::captureContainerContents(gw, h, items, INV_ITEMS_MAX, &hash);
+        int q = 0;
+        for (unsigned int i = 0; i < n; ++i)
+            if (items[i].itemType == type_ && strcmp(items[i].stringID, sid_) == 0)
+                q += (int)items[i].quantity;
+        return q;
+    }
+
+    static const unsigned long SEED_MS     = 6000;
+    static const unsigned long TAKE_MS     = 18000;
+    static const unsigned long GIVE_MS     = 24000;
+    static const unsigned long DURATION_MS = 32000;
+
+    char         sid_[48];
+    unsigned int type_;
+    bool         haveHost_, haveJoin_, seeded_, took_, gave_;
+    int          takeMoved_, giveMoved_;
+    int          hBeforeTake_, jBeforeTake_, hAfterTake_, jAfterTake_, hBeforeGive_, hAfterGive_;
+    unsigned int hostLeader_[5];
+    unsigned int joinLeader_[5];
+};
+
 Scenario* makeInventoryScenario(const std::string& name) {
     // Same scenario twice: the plain run proves the round trip converges, and the
     // _refuse run drives it with the first re-home refused (KENSHICOOP_WD_REFUSE_REHOME),
@@ -2671,6 +2782,7 @@ Scenario* makeInventoryScenario(const std::string& name) {
     if (name == "trade_peer")   return new TradeScenario(/*peer=*/true);
     if (name == "xfer_block")   return new XferBlockScenario();
     if (name == "drop_peer_refused") return new DropPeerRefusedScenario();
+    if (name == "take_refused")      return new TakeRefusedScenario();
     if (name == "inv_equip")    return new InventoryEquipScenario(/*reequip=*/false);
     if (name == "inv_reequip")  return new InventoryEquipScenario(/*reequip=*/true);
     if (name == "inv_wpnseq")   return new WeaponSeqScenario();

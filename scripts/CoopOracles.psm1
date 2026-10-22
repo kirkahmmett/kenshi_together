@@ -162,6 +162,7 @@ function Invoke-OneOracle {
         "bag_persist_race" { return (Test-BagPersist   -HostFile $HostLog -JoinFile $JoinLog -Race) }
         "perm_storage"       { return (Test-PermStorage -HostFile $HostLog -JoinFile $JoinLog) }
         "drop_peer_refused"  { return (Test-DropPeerRefused -HostFile $HostLog -JoinFile $JoinLog) }
+        "take_refused"       { return (Test-TakeRefused -HostFile $HostLog -JoinFile $JoinLog) }
         "perm_storage_allow" { return (Test-PermStorage -HostFile $HostLog -JoinFile $JoinLog -Allow) }
         "connect_bootstrap" { return (Test-ConnectBootstrap -HostFile $HostLog -JoinFile $JoinLog) }
         "connect_stream"    { return (Test-ConnectStream    -HostFile $HostLog -JoinFile $JoinLog) }

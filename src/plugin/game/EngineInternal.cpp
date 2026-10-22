@@ -516,6 +516,12 @@ bool  g_speedIntentFresh  = false; // set by the hooks, cleared by consumeSpeedI
 float g_speedIntentMult   = 1.0f;  // requested multiplier (pause preserves it)
 bool  g_speedIntentPaused = false; // requested pause state
 bool  g_speedIntentSeeded = false; // first consume seeds from live engine state
+bool          g_mpPauseRules = false;
+unsigned long g_pauseKeyTick = 0;
+const unsigned long PAUSE_KEY_WINDOW_MS = 600;
+bool pauseKeyRecent() {
+    return g_pauseKeyTick != 0 && GetTickCount() - g_pauseKeyTick < PAUSE_KEY_WINDOW_MS;
+}
 
 // Last QUIET write (the arbitrated effective we applied). The poll-based
 // intent fallback compares the live engine against THIS to detect real UI
@@ -589,7 +595,7 @@ void __fastcall setGameSpeed_hook(GameWorld* self, float speed, bool click) {
 
 void __fastcall userPause_hook(GameWorld* self, bool p) {
     if (speedDbgOn()) speedDbgLog("userPause", 0.0f, p ? 1 : 0);
-    if (!g_speedGuardWrite) {
+    if (!g_speedGuardWrite && (!g_mpPauseRules || pauseKeyRecent())) {
         g_speedIntentPaused = p;
         g_speedIntentFresh  = true;
     }
@@ -599,7 +605,7 @@ void __fastcall userPause_hook(GameWorld* self, bool p) {
 
 void __fastcall togglePause_hook(GameWorld* self, bool p) {
     if (speedDbgOn()) speedDbgLog("togglePause", 0.0f, p ? 1 : 0);
-    if (!g_speedGuardWrite) {
+    if (!g_speedGuardWrite && (!g_mpPauseRules || pauseKeyRecent())) {
         g_speedIntentPaused = p;
         g_speedIntentFresh  = true;
     }
@@ -709,6 +715,7 @@ TownIsPlayerBldgsFn  g_townIsPlayerBldgsFn  = 0;
 static bool         g_permBuild      = true;
 static bool         g_permContainers = true;
 static bool         g_permBuy        = true;
+static bool         g_permTake       = true;  // v58: take from another player's character
 static bool         g_inBuy          = false; // inside buyItem: its own adds are not storage moves
 static unsigned int g_permRefusalSeq  = 0;
 static int          g_permRefusalKind = 0;
@@ -716,7 +723,7 @@ static void notePermRefusal(int kind, const char* what) {
     ++g_permRefusalSeq;
     g_permRefusalKind = kind;
     char b[128];
-    _snprintf(b, sizeof(b) - 1, "[perm] REFUSED %s (the host has disabled it for joins)", what);
+    _snprintf(b, sizeof(b) - 1, "[perm] REFUSED %s (the host's settings do not allow it)", what);
     b[sizeof(b) - 1] = '\0';
     coop::logLine(b);
 }
@@ -818,7 +825,7 @@ static bool sourceHandOfItem(Item* item, unsigned int out[5]) {
 Item* __fastcall removeDontDestroy_hook(Inventory* self, Item* it, int howmany,
                                         bool returnCopyIfSomeLeft) {
     Item* r = g_removeDontDestroyOrig(self, it, howmany, returnCopyIfSomeLeft);
-    if ((g_blockXfer || xferDumpFlag() || !g_permContainers) && !g_invVetoSuspend) {
+    if ((g_blockXfer || xferDumpFlag() || !g_permContainers || !g_permTake) && !g_invVetoSuspend) {
         __try {
             g_pendRemItem = r ? r : it; g_pendRemInv = self;
             // Resolve + cache the SOURCE owner-character hand NOW, at remove time.
@@ -834,7 +841,7 @@ Item* __fastcall removeDontDestroy_hook(Inventory* self, Item* it, int howmany,
 }
 
 bool __fastcall tryAddItem_hook(Inventory* self, Item* item, int quantity) {
-    if ((g_blockXfer || xferDumpFlag() || !g_permContainers) && !g_invVetoSuspend &&
+    if ((g_blockXfer || xferDumpFlag() || !g_permContainers || !g_permTake) && !g_invVetoSuspend &&
         g_invOwnerClass && self && item) {
         int decision = 0; // 1 = cross-owner veto, 2 = host refused storage for joins
         int srcClass = 0, dstClass = 0;
@@ -863,6 +870,12 @@ bool __fastcall tryAddItem_hook(Inventory* self, Item* item, int quantity) {
                     ((srcClass == 1 && handIsBuilding(dstHand)) ||
                      (dstClass == 1 && handIsBuilding(srcHand))))
                     decision = 2;
+                // Host setting (v58): taking OUT of another player's character
+                // into one of ours. Giving (ours -> theirs) stays allowed.
+                // (A cross-owner move is already decision 1 - the opt-in veto's
+                // kind - so the take rule claims it from there.)
+                if (!g_permTake && srcClass == 2 && dstClass == 1)
+                    decision = 3;
             }
         } __except (EXCEPTION_EXECUTE_HANDLER) { decision = 0; }
         // Diagnostic (A1): under dump, log every add that touches a squad member on
@@ -884,7 +897,8 @@ bool __fastcall tryAddItem_hook(Inventory* self, Item* item, int quantity) {
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
         if (decision == 2) notePermRefusal(2, "storage container use");
-        if ((g_blockXfer && decision == 1) || decision == 2) {
+        if (decision == 3) notePermRefusal(4, "taking items from another player's character");
+        if ((g_blockXfer && decision == 1) || decision == 2 || decision == 3) {
             if (decision == 1) __try {
                 char sid[48]; sid[0] = '\0';
                 GameData* gd = item->getGameData();
@@ -2347,6 +2361,20 @@ int createPlayerSquad(GameWorld* gw, const char* name) {
     return applySquadName(c, std::string(name)) >= 0 ? 1 : -1;
 }
 
+void setMultiplayerPauseRules(bool on) { g_mpPauseRules = on; }
+void notePauseKey() {
+    DWORD fgPid = 0;
+    HWND fg = GetForegroundWindow();
+    if (fg) GetWindowThreadProcessId(fg, &fgPid);
+    if (fgPid == GetCurrentProcessId() && (GetAsyncKeyState(VK_SPACE) & 0x8000))
+        g_pauseKeyTick = GetTickCount();
+}
+void requestPauseToggle() {
+    g_speedIntentPaused = !g_quietPaused;
+    g_speedIntentFresh  = true;
+    g_pauseKeyTick      = GetTickCount(); // deliberate, like Space
+}
+
 int setSquadNameByHand(const unsigned int hand[5], const char* name) {
     if (!name || !name[0] || !g_getPlatoonFn || !g_platoonSetNameFn || !g_platoonGetNameFn)
         return -1;
@@ -2364,6 +2392,15 @@ void setJoinPermissions(bool build, bool containers, bool buy) {
         coop::logLine(b);
     }
     g_permBuild = build; g_permContainers = containers; g_permBuy = buy;
+}
+void setTakeFromPlayers(bool allowed) {
+    if (allowed != g_permTake) {
+        char b[80];
+        _snprintf(b, sizeof(b) - 1, "[perm] take from other players: %s", allowed ? "allowed" : "refused");
+        b[sizeof(b) - 1] = '\0';
+        coop::logLine(b);
+    }
+    g_permTake = allowed;
 }
 unsigned int permRefusalSeq()  { return g_permRefusalSeq; }
 int          permRefusalKind() { return g_permRefusalKind; }
