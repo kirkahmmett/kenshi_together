@@ -20,6 +20,7 @@
 // digit entry.
 #include <kenshi/gui/DatapanelGUI.h>
 #include <kenshi/gui/DataPanelLine.h>
+#include <kenshi/gui/MainBarGUI.h>
 #include <mygui/MyGUI_Delegate.h> // MyGUI::newDelegate + CDelegate* (free-fn callbacks)
 #include <windows.h>
 
@@ -239,13 +240,17 @@ struct CoopPanelUi {
     bool          lastConnected; // last observed st->running (external-change sync)
     bool          lastChkVal;    // last toggle value (connect/disconnect edge)
     bool          needsRebuild;
+    bool          advanced;      // the old role/transport/Steam-ID view
+    bool          hostSettings;  // host view: permission switches expanded
+    bool          toggleRequest; // a button asked to open/close the panel
     bool          f2Down;        // F2 held last tick (rising-edge toggle)
     std::string   lastStatus;    // last status text shown (refresh gate)
     std::string   lastTransfer;  // last save-transfer line shown (refresh gate)
     CoopPanelUi()
         : panel(0), open(false), built(false), hostFlag(true), steamFlag(true),
           connectedFlag(false), lastConnected(false), lastChkVal(false),
-          needsRebuild(false), f2Down(false) {}
+          needsRebuild(false), advanced(false), hostSettings(false),
+          toggleRequest(false), f2Down(false) {}
 };
 
 CoopPanelUi             g_panel;
@@ -282,6 +287,29 @@ std::string             g_lastInviteSig;    // rebuild gate for the invite rows
 DataPanelLine_Button*   g_permBtns[3]  = { 0, 0, 0 };
 void                  (*g_permToggleFn)(int) = 0;
 int                     g_lastPermSig  = -1; // rebuild gate (bit per switch)
+
+// Simple view (protocol 57): Host for friends / Join a friend / Leave, with the
+// old role/transport/Steam-ID rows one click away under Advanced.
+const int               GAME_ROWS_MAX  = 8;
+CoopConnectFn           g_onConnectFn    = 0; // set each tick (button callbacks)
+CoopDisconnectFn        g_onDisconnectFn = 0;
+DataPanelLine_Button*   g_hostBtn      = 0;
+DataPanelLine_Button*   g_refreshBtn   = 0;
+DataPanelLine_Button*   g_advBtn       = 0; // simple -> advanced
+DataPanelLine_Button*   g_simpleBtn    = 0; // advanced -> simple
+DataPanelLine_Button*   g_leaveBtn     = 0;
+DataPanelLine_Button*   g_gameBtns[GAME_ROWS_MAX];
+std::string             g_lastSimpleSig;
+DataPanelLine_Button*   g_hostSetBtn   = 0; // host view: show/hide permission switches
+DataPanelLine_Button*   g_autoHostBtn  = 0; // "Always host my games"
+void                  (*g_autoHostToggleFn)() = 0;
+// Main-menu launcher: a small window by Kenshi's own menu, so nobody has to
+// know about F2. "Multiplayer" opens the panel; with exactly one friend
+// hosting, a second button joins them in one click.
+DatapanelGUI*           g_launch       = 0;
+DataPanelLine_Button*   g_launchBtn    = 0;
+DataPanelLine_Button*   g_quickJoinBtn = 0;
+std::string             g_lastLaunchSig;
 
 // Button callbacks (free functions - MyGUI::newDelegate wraps them without any
 // raw-MyGUI link). A press flips the armed flag and requests a rebuild so the
@@ -355,6 +383,64 @@ void onInviteBtn(DataPanelLine*) {
     coop::logLine("[coop-ui] invite: friend list opened");
     g_panel.needsRebuild = true;
 }
+// Simple view actions.
+void onLaunchBtn(DataPanelLine*) {
+    g_panel.toggleRequest = true;
+    coop::logLine("[coop-ui] Multiplayer button");
+}
+void onQuickJoinBtn(DataPanelLine*) {
+    if (!g_inviteApi || !g_inviteApi->joinGame) return;
+    g_panel.hostFlag = false; g_panel.steamFlag = true;
+    coop::logLine("[coop-ui] quick join");
+    g_inviteApi->joinGame(0);
+}
+void onHostSetBtn(DataPanelLine*) {
+    g_panel.hostSettings = !g_panel.hostSettings;
+    g_panel.needsRebuild = true;
+}
+void onAutoHostBtn(DataPanelLine*) {
+    if (g_autoHostToggleFn) g_autoHostToggleFn();
+    g_panel.needsRebuild = true;
+}
+void onHostBtn(DataPanelLine*) {
+    g_panel.hostFlag = true; g_panel.steamFlag = true;
+    g_panel.connectedFlag = true; g_panel.lastChkVal = true; // no second connect edge
+    g_panel.needsRebuild = true;
+    coop::logLine("[coop-ui] Host for friends");
+    if (g_onConnectFn) g_onConnectFn(true, true, 0);
+    if (g_inviteApi && g_inviteApi->hostLobby) g_inviteApi->hostLobby();
+}
+void onGameBtn(DataPanelLine* line) {
+    if (!g_inviteApi || !g_inviteApi->joinGame) return;
+    for (int i = 0; i < GAME_ROWS_MAX; ++i) {
+        if (g_gameBtns[i] && (DataPanelLine*)g_gameBtns[i] == line) {
+            g_panel.hostFlag = false; g_panel.steamFlag = true;
+            char b[64];
+            _snprintf(b, sizeof(b) - 1, "[coop-ui] Join a friend: row %d", i);
+            b[sizeof(b) - 1] = '\0';
+            coop::logLine(b);
+            g_inviteApi->joinGame(i); // connects once Steam lets us into the lobby
+            g_panel.needsRebuild = true;
+            return;
+        }
+    }
+}
+void onRefreshBtn(DataPanelLine*) {
+    if (g_inviteApi && g_inviteApi->refreshGames) g_inviteApi->refreshGames();
+    g_panel.needsRebuild = true;
+}
+void onAdvBtn(DataPanelLine*) {
+    g_panel.advanced = !g_panel.advanced;
+    g_panel.needsRebuild = true;
+    coop::logLine(g_panel.advanced ? "[coop-ui] advanced view" : "[coop-ui] simple view");
+}
+void onLeaveBtn(DataPanelLine*) {
+    g_panel.connectedFlag = false; g_panel.lastChkVal = false;
+    g_panel.needsRebuild = true;
+    coop::logLine("[coop-ui] Leave / stop hosting");
+    if (g_onDisconnectFn) g_onDisconnectFn();
+}
+
 // One callback for every friend row: the line pointer says which friend.
 void onFriendBtn(DataPanelLine* line) {
     if (!g_inviteApi || !g_inviteApi->invite) return;
@@ -369,6 +455,35 @@ void onFriendBtn(DataPanelLine* line) {
             return;
         }
     }
+}
+
+// Simple view rows: a flat list built in one SEH frame (no std::string made in
+// it). kind 0 = text line, 1 = button, 2 = spacer. out receives the created row.
+struct SimpleRow {
+    int                 kind;
+    const std::string*  key;
+    const std::string*  val;   // text value / button caption
+    DataPanelLine**     out;
+};
+const int SIMPLE_ROWS_MAX = 40;
+
+void panelBuildSimpleSeh(DatapanelGUI* p, const std::string* title,
+                         const SimpleRow* rows, int n, const std::string* empty) {
+    __try {
+        p->_NV_clear();
+        p->setCaption(*title);
+        for (int i = 0; i < n; ++i) {
+            DataPanelLine* made = 0;
+            if (rows[i].kind == 0)
+                made = p->setLine(*rows[i].key, *rows[i].val, *empty, 0, false, true);
+            else if (rows[i].kind == 1)
+                made = (DataPanelLine*)p->setLineButton(*rows[i].key, *rows[i].val, 0);
+            else
+                p->addSpace(0, 0.35f);
+            if (rows[i].out) *rows[i].out = made;
+        }
+        p->_NV_update();
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 // POD-only pointer bundle so the row-build SEH frame constructs no std::string.
@@ -388,12 +503,19 @@ struct PanelStrings {
     // Host settings for the join (null = rows hidden).
     const std::string *permKey[3];
     const std::string *permCap[3];
+    // "Simple view" button at the top of the advanced view.
+    const std::string *backKey, *backCap;
 };
 
 void panelBuildSeh(DatapanelGUI* p, const PanelStrings* s) {
     __try {
         p->_NV_clear();
         p->setCaption(*s->title);
+        g_simpleBtn = 0;
+        if (s->backKey) {
+            g_simpleBtn = p->setLineButton(*s->backKey, *s->backCap, 0);
+            p->addSpace(0, 0.35f);
+        }
         g_roleBtn  = p->setLineButton(*s->roleKey,  *s->roleCap,  0);
         g_transBtn = p->setLineButton(*s->transKey, *s->transCap, 0);
         g_connBtn  = p->setLineButton(*s->connKey,  *s->connCap,  0);
@@ -476,6 +598,9 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
     if (!st) return;
     g_inviteApi = st->invite;
     g_permToggleFn = st->onPermToggle;
+    g_onConnectFn = onConnect;
+    g_onDisconnectFn = onDisconnect;
+    g_autoHostToggleFn = st->onAutoHostToggle;
     ForgottenGUI* g = ::gui; // KenshiLib data export (spike 46)
     { static void* s_last = (void*)-1;
       if ((void*)g != s_last) { s_last = (void*)g;
@@ -495,8 +620,20 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
 
     // Panel key (F2 unless configured) rising edge toggles the panel open/closed.
     const int panelVk = (st->panelVk >= VK_F1 && st->panelVk <= VK_F12) ? st->panelVk : VK_F2;
-    bool f2 = (GetAsyncKeyState(panelVk) & 0x8000) != 0;
-    if (f2 && !g_panel.f2Down) {
+    // GetAsyncKeyState is system-wide: only count the key while OUR window is
+    // in front, or F2 in another program (or another Kenshi) toggles this panel.
+    DWORD fgPid = 0;
+    HWND fg = GetForegroundWindow();
+    if (fg) GetWindowThreadProcessId(fg, &fgPid);
+    bool f2 = fgPid == GetCurrentProcessId() && (GetAsyncKeyState(panelVk) & 0x8000) != 0;
+    // Test aid: KENSHICOOP_PANEL_OPEN=1 opens the panel once at start, so a
+    // screenshot needs no key press (and no stolen focus).
+    { static int s_autoOpen = -1;
+      if (s_autoOpen < 0) { char e[4]; s_autoOpen = (GetEnvironmentVariableA("KENSHICOOP_PANEL_OPEN", e, sizeof(e)) > 0 && e[0] == '1') ? 1 : 0;
+                            if (s_autoOpen) g_panel.toggleRequest = true; } }
+    const bool toggle = (f2 && !g_panel.f2Down) || g_panel.toggleRequest;
+    g_panel.toggleRequest = false;
+    if (toggle) {
         if (!g_panel.open) {
             g_panel.hostFlag      = st->isHost;
             g_panel.steamFlag     = (st->transportSel == 0);
@@ -517,11 +654,68 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             g_lastInviteSig.clear();
             for (int i = 0; i < 3; ++i) g_permBtns[i] = 0;
             g_lastPermSig = -1;
+            g_hostBtn = 0; g_refreshBtn = 0; g_advBtn = 0; g_simpleBtn = 0; g_leaveBtn = 0;
+            g_hostSetBtn = 0; g_autoHostBtn = 0;
+            for (int i = 0; i < GAME_ROWS_MAX; ++i) g_gameBtns[i] = 0;
+            g_lastSimpleSig.clear();
             g_panel.open = false;
             coop::logLine("[coop-ui] panel closed");
         }
     }
     g_panel.f2Down = f2;
+
+    // ---- Main-menu launcher -------------------------------------------------
+    const bool wantLauncher = !st->inGame && !st->running && !g_panel.open;
+    // "Join a friend" list refresh runs only while something shows it.
+    if (g_inviteApi && g_inviteApi->setBrowsing)
+        g_inviteApi->setBrowsing(((g_panel.open && !g_panel.advanced) || wantLauncher) &&
+                                 !st->running);
+    if (wantLauncher) {
+        if (!g_launch) {
+            std::string layer = "Info";
+            g_launch = g->createDatapanel(0.05f, 0.40f, 0.22f, 0.13f, false, layer, true); // (top, left, w, h): above the logo
+            g_lastLaunchSig.clear();
+            if (g_launch && !uiPanelArmSeh(g, g_launch)) g_launch = 0;
+        }
+        const bool apiOk = g_inviteApi && g_inviteApi->ready && g_inviteApi->ready();
+        int games = (apiOk && g_inviteApi->gameCount) ? g_inviteApi->gameCount() : 0;
+        std::string one = (games == 1) ? std::string(g_inviteApi->gameName(0)) : std::string();
+        char sb[32];
+        _snprintf(sb, sizeof(sb) - 1, "%d|", games);
+        sb[sizeof(sb) - 1] = '\0';
+        std::string sig = std::string(sb) + one;
+        if (g_launch && sig != g_lastLaunchSig) {
+            char cap[48];
+            _snprintf(cap, sizeof(cap) - 1, "Multiplayer    (F%d)", panelVk - VK_F1 + 1);
+            cap[sizeof(cap) - 1] = '\0';
+            std::string title = "KenshiCoop", empty = "";
+            std::string k0 = "mp", v0 = cap, k1 = "qj", v1, k2 = "Hosting", v2;
+            SimpleRow rows[3];
+            int n = 0;
+            g_launchBtn = 0; g_quickJoinBtn = 0;
+            rows[n].kind = 1; rows[n].key = &k0; rows[n].val = &v0;
+            rows[n].out = (DataPanelLine**)&g_launchBtn; ++n;
+            if (games == 1) {
+                v1 = "Join  " + one + "'s game";
+                rows[n].kind = 1; rows[n].key = &k1; rows[n].val = &v1;
+                rows[n].out = (DataPanelLine**)&g_quickJoinBtn; ++n;
+            } else if (games > 1) {
+                char gb[64];
+                _snprintf(gb, sizeof(gb) - 1, "%d friends are hosting - open Multiplayer", games);
+                gb[sizeof(gb) - 1] = '\0';
+                v2 = gb;
+                rows[n].kind = 0; rows[n].key = &k2; rows[n].val = &v2; rows[n].out = 0; ++n;
+            }
+            panelBuildSimpleSeh(g_launch, &title, rows, n, &empty);
+            if (g_launchBtn)    g_launchBtn->callback    = MyGUI::newDelegate(&onLaunchBtn);
+            if (g_quickJoinBtn) g_quickJoinBtn->callback = MyGUI::newDelegate(&onQuickJoinBtn);
+            g_lastLaunchSig = sig;
+        }
+    } else if (g_launch) {
+        panelDestroySeh(g, g_launch);
+        g_launch = 0; g_launchBtn = 0; g_quickJoinBtn = 0;
+        g_lastLaunchSig.clear();
+    }
 
     if (!g_panel.open) return;
 
@@ -579,7 +773,8 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
     // and armed but attaches to nothing, so F2 logs open/close yet nothing draws.
     if (!g_panel.panel) {
         std::string layer = "Info";
-        g_panel.panel = g->createDatapanel(0.22f, 0.30f, 0.30f, 0.44f, false, layer, true);
+        // Right of centre: clear of RE_Kenshi's own menu on the left.
+        g_panel.panel = g->createDatapanel(0.18f, 0.56f, 0.30f, 0.50f, false, layer, true); // (top, left, w, h)
         g_panel.built = false;
         if (!g_panel.panel) {
             coop::logErrLine("[coop-ui] createDatapanel FAILED");
@@ -588,8 +783,147 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
         }
     }
 
-    // (Re)populate the rows when anything visible changed.
-    if (g_panel.panel && (g_panel.needsRebuild || !g_panel.built)) {
+    // ---- Simple view ------------------------------------------------------
+    if (g_panel.panel && !g_panel.advanced) {
+        const bool apiOk = g_inviteApi && g_inviteApi->ready && g_inviteApi->ready();
+        std::string players = st->players ? std::string(st->players) : std::string();
+        std::string invStat = (apiOk && g_inviteApi->status) ? g_inviteApi->status() : "";
+        // Signature of everything shown: rebuild only when it changes.
+        std::string sig = std::string(st->running ? "R" : "r") + (st->isHost ? "H" : "h") +
+                          (st->inGame ? "G" : "g") + (st->peerPresent ? "P" : "p") + "|" +
+                          detail + "|" + transfer + "|" + players + "|" + invStat;
+        int games = (apiOk && g_inviteApi->gameCount) ? g_inviteApi->gameCount() : 0;
+        for (int i = 0; i < games && i < GAME_ROWS_MAX; ++i) sig += std::string("|g") + g_inviteApi->gameName(i);
+        const bool hostOnline = st->running && st->isHost;
+        int friendsN = 0;
+        if (hostOnline && apiOk && g_inviteApi->pickerActive && g_inviteApi->pickerActive()) {
+            int n = g_inviteApi->friendCount ? g_inviteApi->friendCount() : 0;
+            for (int i = 0; i < n && friendsN < INVITE_ROWS_MAX; ++i) {
+                if (g_inviteApi->friendState(i) <= 0) break;
+                char b[40];
+                _snprintf(b, sizeof(b) - 1, "|f%llu:%d", g_inviteApi->friendId(i),
+                          g_inviteApi->friendState(i));
+                b[sizeof(b) - 1] = '\0';
+                sig += b;
+                ++friendsN;
+            }
+        }
+        if (hostOnline) sig += (st->permBuild ? "B" : "b") + std::string(st->permContainers ? "C" : "c") +
+                               (st->permBuy ? "Y" : "y") + (g_panel.hostSettings ? "S" : "s");
+        sig += st->autoHost ? "A" : "a";
+        if (g_panel.needsRebuild || !g_panel.built || sig != g_lastSimpleSig) {
+            char titleBuf[64];
+            _snprintf(titleBuf, sizeof(titleBuf) - 1, "Co-op    -    F%d to close",
+                      panelVk - VK_F1 + 1);
+            titleBuf[sizeof(titleBuf) - 1] = '\0';
+            std::string title = titleBuf;
+            std::string empty = "";
+            // Every string the rows point at lives in these arrays for the build.
+            std::string keys[SIMPLE_ROWS_MAX], vals[SIMPLE_ROWS_MAX];
+            SimpleRow rows[SIMPLE_ROWS_MAX];
+            int n = 0;
+            DataPanelLine* statusLine = 0;
+            DataPanelLine* infoLines[4] = { 0, 0, 0, 0 };
+            int infoN = 0;
+            g_hostBtn = 0; g_refreshBtn = 0; g_advBtn = 0; g_leaveBtn = 0;
+            for (int i = 0; i < GAME_ROWS_MAX; ++i) g_gameBtns[i] = 0;
+            for (int i = 0; i < INVITE_ROWS_MAX; ++i) { g_friendBtns[i] = 0; g_friendBtnIds[i] = 0; }
+            for (int i = 0; i < 3; ++i) g_permBtns[i] = 0;
+            g_inviteBtn = 0; g_hostSetBtn = 0; g_autoHostBtn = 0;
+#define ROW(k, kk, vv, o) do { if (n < SIMPLE_ROWS_MAX) { keys[n] = (kk); vals[n] = (vv); \
+            rows[n].kind = (k); rows[n].key = &keys[n]; rows[n].val = &vals[n]; \
+            rows[n].out = (DataPanelLine**)(o); ++n; } } while (0)
+            std::string statusVal = !transfer.empty() ? transfer : detail;
+            const bool hasErr = !st->peerPresent && st->lastError && st->lastError[0];
+            if (!st->running) {
+                if (!invStat.empty()) statusVal = invStat;
+                else if (hasErr) statusVal = std::string("Offline - ") + st->lastError;
+                else statusVal = "Offline";
+                if (st->inGame) ROW(1, "host", "Host for friends", &g_hostBtn);
+                else ROW(0, "Host", "Load or start a game to host for friends", &infoLines[infoN++]);
+                if (g_autoHostToggleFn)
+                    ROW(1, "autohost", std::string("Always host my games: ") +
+                                       (st->autoHost ? "ON" : "OFF") + "    (switch)",
+                        &g_autoHostBtn);
+                ROW(2, "", "", 0);
+                ROW(0, "Join a friend", games > 0 ? "Pick a friend's game:"
+                                                  : "No Steam friend is hosting right now",
+                    &infoLines[infoN++]);
+                for (int i = 0; i < games && i < GAME_ROWS_MAX; ++i) {
+                    char k[8]; _snprintf(k, sizeof(k) - 1, "game%d", i); k[sizeof(k) - 1] = '\0';
+                    ROW(1, k, std::string("Join  ") + g_inviteApi->gameName(i) + "'s game", &g_gameBtns[i]);
+                }
+                ROW(1, "refresh", "Refresh list", &g_refreshBtn);
+                ROW(2, "", "", 0);
+                ROW(0, "Status", "Status: " + statusVal, &statusLine);
+                ROW(2, "", "", 0);
+                ROW(1, "adv", "Advanced (IP / Steam ID)", &g_advBtn);
+            } else {
+                ROW(0, "Status", "Status: " + statusVal, &statusLine);
+                if (!players.empty()) ROW(0, "Players", "Players: " + players, &infoLines[infoN++]);
+                ROW(2, "", "", 0);
+                if (st->isHost) {
+                    ROW(1, "invite", "Invite a Steam friend", &g_inviteBtn);
+                    if (!invStat.empty()) ROW(0, "Invite", "Invite: " + invStat, &infoLines[infoN++]);
+                    if (apiOk && g_inviteApi->pickerActive && g_inviteApi->pickerActive()) {
+                        int fr = 0, nf = g_inviteApi->friendCount ? g_inviteApi->friendCount() : 0;
+                        for (int i = 0; i < nf && fr < INVITE_ROWS_MAX; ++i) {
+                            int stt = g_inviteApi->friendState(i);
+                            if (stt <= 0) break;
+                            char k[8]; _snprintf(k, sizeof(k) - 1, "inv%d", fr); k[sizeof(k) - 1] = '\0';
+                            const char* nm = g_inviteApi->friendName(i);
+                            g_friendBtnIds[fr] = g_inviteApi->friendId(i);
+                            ROW(1, k, std::string("Invite  ") + (nm ? nm : "?") +
+                                          (stt == 2 ? "    (in Kenshi)" : "    (online)"),
+                                &g_friendBtns[fr]);
+                            ++fr;
+                        }
+                    }
+                    ROW(2, "", "", 0);
+                    ROW(1, "hostset", g_panel.hostSettings ? "Host settings    (hide)"
+                                                            : "Host settings    (show)",
+                        &g_hostSetBtn);
+                    if (g_panel.hostSettings) {
+                        const char* what[3] = { "Join may build", "Join may use storage", "Join may buy" };
+                        const bool  on[3]   = { st->permBuild, st->permContainers, st->permBuy };
+                        const char* pk[3]   = { "permbuild", "permstore", "permbuy" };
+                        for (int i = 0; i < 3; ++i)
+                            ROW(1, pk[i], std::string("    ") + what[i] + ": " + (on[i] ? "YES" : "NO") +
+                                              "    (switch)", &g_permBtns[i]);
+                    }
+                    ROW(2, "", "", 0);
+                    ROW(1, "leave", "Stop hosting", &g_leaveBtn);
+                } else {
+                    ROW(1, "leave", "Leave session", &g_leaveBtn);
+                }
+            }
+#undef ROW
+            panelBuildSimpleSeh(g_panel.panel, &title, rows, n, &empty);
+            if (g_hostBtn)    g_hostBtn->callback    = MyGUI::newDelegate(&onHostBtn);
+            if (g_refreshBtn) g_refreshBtn->callback = MyGUI::newDelegate(&onRefreshBtn);
+            if (g_advBtn)     g_advBtn->callback     = MyGUI::newDelegate(&onAdvBtn);
+            if (g_leaveBtn)   g_leaveBtn->callback   = MyGUI::newDelegate(&onLeaveBtn);
+            if (g_inviteBtn)  g_inviteBtn->callback  = MyGUI::newDelegate(&onInviteBtn);
+            if (g_hostSetBtn) g_hostSetBtn->callback = MyGUI::newDelegate(&onHostSetBtn);
+            if (g_autoHostBtn) g_autoHostBtn->callback = MyGUI::newDelegate(&onAutoHostBtn);
+            for (int i = 0; i < GAME_ROWS_MAX; ++i)
+                if (g_gameBtns[i]) g_gameBtns[i]->callback = MyGUI::newDelegate(&onGameBtn);
+            for (int i = 0; i < INVITE_ROWS_MAX; ++i)
+                if (g_friendBtns[i]) g_friendBtns[i]->callback = MyGUI::newDelegate(&onFriendBtn);
+            for (int i = 0; i < 3; ++i)
+                if (g_permBtns[i]) g_permBtns[i]->callback = MyGUI::newDelegate(&onPermBtn);
+            dbgColourSeh(statusLine, !transfer.empty() || hasErr);
+            for (int i = 0; i < infoN; ++i) dbgColourSeh(infoLines[i], false);
+            g_panel.built = true;
+            g_panel.needsRebuild = false;
+            g_panel.lastStatus = detail;
+            g_panel.lastTransfer = transfer;
+            g_lastSimpleSig = sig;
+        }
+    }
+
+    // (Re)populate the rows when anything visible changed (advanced view).
+    if (g_panel.panel && g_panel.advanced && (g_panel.needsRebuild || !g_panel.built)) {
         char titleBuf[64];
         _snprintf(titleBuf, sizeof(titleBuf) - 1, "Co-op Session    -    F%d to close",
                   panelVk - VK_F1 + 1);
@@ -722,7 +1056,10 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             ps.permKey[i] = offerPerms ? &permKeys[i] : 0;
             ps.permCap[i] = offerPerms ? &permCaps[i] : 0;
         }
+        std::string backKey = "simple", backCap = "Back to the simple view";
+        ps.backKey = &backKey; ps.backCap = &backCap;
         panelBuildSeh(g_panel.panel, &ps);
+        if (g_simpleBtn) g_simpleBtn->callback = MyGUI::newDelegate(&onAdvBtn);
 
         // Delegate assignment + white-colouring live OUTSIDE the SEH frame (pointer
         // targets are valid post-build; assignment can't fault) so no delegate
@@ -769,6 +1106,16 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             if (onDisconnect) onDisconnect();
         }
     }
+}
+
+// Squad tab captions are cached by the main bar; after renaming a squad (player
+// names, protocol 57) ask it to rebuild the tabs. Main thread; SEH-guarded.
+void refreshSquadTabs() {
+    ForgottenGUI* g = ::gui;
+    if (!g) return;
+    __try {
+        if (g->mainbar) g->mainbar->refreshPortraitTabs();
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 // ---- Persistent co-op status overlay ----------------------------------------

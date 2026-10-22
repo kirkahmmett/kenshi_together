@@ -82,6 +82,10 @@ public:
     // squad. On a single-tab save only rank 0 exists -> the join owns nothing and the
     // prior one-directional behaviour is preserved.
     void setOwnRanks(const std::set<unsigned int>& r) { ownRanks_ = r; }
+    // Protocol 57: tab ownership by squad NAME (each player's tab carries their
+    // Steam name). An entry here wins over the rank rule and the once-per-tab
+    // verdict; tabs missing from the map keep the old rules.
+    void setTabNameOwnership(const std::map<std::pair<u32, u32>, bool>& m) { tabNameOwned_ = m; }
 
     // Cross-owner trade veto classifier (engine InvOwnerClassFn). Given a
     // save-stable owner hand (readObjectHand layout [type,container,
@@ -2199,6 +2203,7 @@ private:
     // EVT_SQUAD_MOVE exit CLEARS it - after which the body fell back to the
     // rank rule and was orphaned. A verdict on the CONTAINER outlives the pins.
     std::map<std::pair<u32, u32>, bool> tabOwned_;
+    std::map<std::pair<u32, u32>, bool> tabNameOwned_; // protocol 57, see setTabNameOwnership
     // Number of tabs present at session-start seeding, i.e. the length of the
     // rank prefix that means the same thing on both clients. Ranks past it are
     // assigned in local first-seen order and DIVERGE (measured: host rank 2 =

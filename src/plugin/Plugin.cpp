@@ -263,6 +263,35 @@ bool          g_namesDirty = false;
 DWORD         g_namesSentTick = 0;
 DWORD         g_namesApplyTick = 0;
 const DWORD   ROSTER_RESEND_MS = 10000;
+
+// "Always host my games" (panel switch), kept in KenshiCoop_prefs.txt next to
+// the logs. When on, a loaded game is opened to friends once per load.
+bool          g_autoHost = false;
+bool          g_autoHostDone = false; // already hosted (or tried) for this load
+bool          g_prefsLoaded = false;
+const char*   PREFS_FILE = "KenshiCoop_prefs.txt";
+void loadPrefs() {
+    if (g_prefsLoaded) return;
+    g_prefsLoaded = true;
+    FILE* f = fopen(PREFS_FILE, "r");
+    if (!f) return;
+    char line[128];
+    while (fgets(line, sizeof(line), f))
+        if (strncmp(line, "autoHost=1", 10) == 0) g_autoHost = true;
+    fclose(f);
+}
+void savePrefs() {
+    FILE* f = fopen(PREFS_FILE, "w");
+    if (!f) return;
+    fprintf(f, "autoHost=%d\n", g_autoHost ? 1 : 0);
+    fclose(f);
+}
+void onAutoHostToggle() {
+    g_autoHost = !g_autoHost;
+    g_autoHostDone = g_net.isRunning(); // switching on mid-game hosts now if offline
+    savePrefs();
+    coopLog(g_autoHost ? "[coop-ui] always host: ON" : "[coop-ui] always host: OFF");
+}
 const DWORD   NAMES_APPLY_MS   = 2000;
 const DWORD   PERM_NOTICE_MS = 5000;
 
@@ -310,71 +339,196 @@ void tickPermissions() {
     }
 }
 
-void tickRoster(GameWorld* gw) {
+// A real player session (not a scripted test): squad tabs follow player names.
+// Scripted scenarios keep the old rank rule (host tab 0, join tab = its id).
+bool realSession() { return g_cfg.scenario.empty() && g_cfg.testSeconds == 0; }
+
+// Our own name as the session knows it (the host may have made it unique).
+std::string myPlayerName() {
+    std::map<coop::u32, std::string>::const_iterator it =
+        g_names.find(g_cfg.isHost ? 0u : g_net.localId());
+    return it != g_names.end() ? it->second : std::string();
+}
+
+// Take in names that arrived (HELLO on the host, PKT_ROSTER on a join). The
+// host keeps them unique - two players with the same Steam name would own the
+// same tab - by suffixing the newcomer's id.
+void ingestRoster() {
     std::deque<coop::InboundRoster> got;
     g_inbound.drainRoster(got);
-    for (std::deque<coop::InboundRoster>::iterator it = got.begin(); it != got.end(); ++it) {
-        if (g_names[it->playerId] != it->name) {
-            g_names[it->playerId] = it->name;
-            g_namesDirty = true;
-            char b[96];
-            _snprintf(b, sizeof(b) - 1, "[names] player %u is '%s'",
-                      (unsigned)it->playerId, it->name.c_str());
-            b[sizeof(b) - 1] = '\0';
-            coopLog(b);
-        }
-    }
-    DWORD now = GetTickCount();
     if (g_cfg.isHost) {
         std::string me = coop::steaminvite::selfName();
         if (!me.empty() && g_names[0] != me) { g_names[0] = me; g_namesDirty = true; }
-        if (g_peerPresent && g_net.isRunning() &&
-            (g_namesDirty || now - g_namesSentTick >= ROSTER_RESEND_MS)) {
-            for (std::map<coop::u32, std::string>::const_iterator it = g_names.begin();
-                 it != g_names.end(); ++it) {
-                if (it->second.empty()) continue;
-                coop::RosterPacket p;
-                memset(&p, 0, sizeof(p));
-                p.type = (coop::u8)coop::PKT_ROSTER;
-                p.playerId = it->first;
-                size_t nl = it->second.size();
-                if (nl > coop::ROSTER_NAME_MAX) nl = coop::ROSTER_NAME_MAX;
-                p.nameLen = (coop::u8)nl;
-                memcpy(p.name, it->second.data(), nl);
-                g_net.queueRoster(p);
+    }
+    for (std::deque<coop::InboundRoster>::iterator it = got.begin(); it != got.end(); ++it) {
+        std::string name = it->name;
+        if (g_cfg.isHost && it->playerId != 0) {
+            for (std::map<coop::u32, std::string>::const_iterator o = g_names.begin();
+                 o != g_names.end(); ++o) {
+                if (o->first == it->playerId || o->second != name) continue;
+                char sfx[16];
+                _snprintf(sfx, sizeof(sfx) - 1, " #%u", (unsigned)it->playerId);
+                sfx[sizeof(sfx) - 1] = '\0';
+                name += sfx;
+                break;
             }
-            g_namesSentTick = now;
         }
-    }
-    // Apply: tab rank r (distinct squad containers in sorted order - the order
-    // the ownership partition uses) is player r's squad.
-    if (g_names.empty() || !gw || !g_gameStarted || !coop::engine::gameplayLive(gw)) return;
-    if (!g_namesDirty && now - g_namesApplyTick < NAMES_APPLY_MS) return;
-    g_namesApplyTick = now;
-    g_namesDirty = false;
-    coop::EntityState sq[64];
-    unsigned int n = coop::engine::captureSquad(gw, /*leaderOnly*/ false, sq, 64);
-    std::vector<std::pair<std::pair<coop::u32, coop::u32>, unsigned int> > tabs; // container -> first member
-    for (unsigned int i = 0; i < n; ++i) {
-        std::pair<coop::u32, coop::u32> k(sq[i].hContainer, sq[i].hContainerSerial);
-        bool seen = false;
-        for (size_t t = 0; t < tabs.size(); ++t) if (tabs[t].first == k) { seen = true; break; }
-        if (!seen) tabs.push_back(std::make_pair(k, i));
-    }
-    std::sort(tabs.begin(), tabs.end());
-    for (std::map<coop::u32, std::string>::const_iterator it = g_names.begin();
-         it != g_names.end(); ++it) {
-        if (it->second.empty() || it->first >= tabs.size()) continue;
-        const coop::EntityState& e = sq[tabs[it->first].second];
-        unsigned int h[5] = { e.hType, e.hContainer, e.hContainerSerial, e.hIndex, e.hSerial };
-        if (coop::engine::setSquadNameByHand(h, it->second.c_str()) == 1) {
+        if (g_names[it->playerId] != name) {
+            g_names[it->playerId] = name;
+            g_namesDirty = true;
             char b[96];
-            _snprintf(b, sizeof(b) - 1, "[names] squad tab %u -> '%s'",
-                      (unsigned)it->first, it->second.c_str());
+            _snprintf(b, sizeof(b) - 1, "[names] player %u is '%s'",
+                      (unsigned)it->playerId, name.c_str());
             b[sizeof(b) - 1] = '\0';
             coopLog(b);
         }
     }
+}
+
+bool squadTabLess(const struct SquadTab& a, const struct SquadTab& b);
+struct SquadTab {
+    std::pair<coop::u32, coop::u32> key; // container hand: the tab
+    unsigned int hand[5];                // one member, to reach the squad
+    std::string  name;
+};
+bool squadTabLess(const SquadTab& a, const SquadTab& b) { return a.key < b.key; }
+void listSquadTabs(GameWorld* gw, std::vector<SquadTab>& out) {
+    out.clear();
+    coop::EntityState sq[64];
+    unsigned int n = coop::engine::captureSquad(gw, /*leaderOnly*/ false, sq, 64);
+    for (unsigned int i = 0; i < n; ++i) {
+        std::pair<coop::u32, coop::u32> k(sq[i].hContainer, sq[i].hContainerSerial);
+        bool seen = false;
+        for (size_t t = 0; t < out.size(); ++t) if (out[t].key == k) { seen = true; break; }
+        if (seen) continue;
+        SquadTab tab;
+        tab.key = k;
+        tab.hand[0] = sq[i].hType; tab.hand[1] = sq[i].hContainer;
+        tab.hand[2] = sq[i].hContainerSerial; tab.hand[3] = sq[i].hIndex;
+        tab.hand[4] = sq[i].hSerial;
+        char nm[64];
+        coop::engine::getSquadNameByHand(tab.hand, nm, sizeof(nm));
+        tab.name = nm;
+        out.push_back(tab);
+    }
+    std::sort(out.begin(), out.end(), squadTabLess);
+}
+
+std::set<std::string> connectedJoinNames() {
+    std::set<std::string> out;
+    for (std::set<coop::u32>::const_iterator it = g_peers.begin(); it != g_peers.end(); ++it) {
+        std::map<coop::u32, std::string>::const_iterator nm = g_names.find(*it);
+        if (*it != 0 && nm != g_names.end() && !nm->second.empty()) out.insert(nm->second);
+    }
+    return out;
+}
+
+// HOST, before the world is sent to a join: every connected player gets a
+// squad tab named after them - the one already carrying their name, else an
+// unnamed one ("NAMELESS_n", a co-op start's spare), else a new character in a
+// new tab. The host keeps the first tab. Renames travel in the pushed save.
+// Returns true when it CREATED a character: a body made this session has a
+// different object id in the save than in the host's live world, so the host
+// must reload that save too (see armConnectPush).
+bool g_bootReloadHost = false;
+bool assignSquads(GameWorld* gw) {
+    if (!g_cfg.isHost || !realSession() || !gw) return false;
+    std::vector<SquadTab> tabs;
+    listSquadTabs(gw, tabs);
+    if (tabs.empty()) return false;
+    bool created = false;
+    const std::string me = myPlayerName();
+    const std::set<std::string> joins = connectedJoinNames();
+    std::set<std::string> taken;
+    for (size_t t = 0; t < tabs.size(); ++t) taken.insert(tabs[t].name);
+    bool changed = false;
+    if (!me.empty() && !taken.count(me) && !joins.count(tabs[0].name) &&
+        coop::engine::setSquadNameByHand(tabs[0].hand, me.c_str()) == 1) {
+        tabs[0].name = me; taken.insert(me); changed = true;
+    }
+    for (std::set<std::string>::const_iterator j = joins.begin(); j != joins.end(); ++j) {
+        if (taken.count(*j)) continue;
+        int pick = -1;
+        for (size_t t = 1; t < tabs.size() && pick < 0; ++t) {
+            const std::string& nm = tabs[t].name;
+            if (nm == me || joins.count(nm)) continue;
+            std::string low = nm;
+            for (size_t c = 0; c < low.size(); ++c) low[c] = (char)tolower((unsigned char)low[c]);
+            if (low.find("nameless") == 0 || low.find("(co-op)") != std::string::npos)
+                pick = (int)t;
+        }
+        char b[160];
+        if (pick >= 0 && coop::engine::setSquadNameByHand(tabs[pick].hand, j->c_str()) == 1) {
+            _snprintf(b, sizeof(b) - 1, "[names] squad '%s' -> '%s' (free tab)",
+                      tabs[pick].name.c_str(), j->c_str());
+            tabs[pick].name = *j;
+        } else if (coop::engine::createPlayerSquad(gw, j->c_str()) == 1) {
+            created = true;
+            _snprintf(b, sizeof(b) - 1, "[names] new character + squad '%s'", j->c_str());
+        } else {
+            _snprintf(b, sizeof(b) - 1, "[names] FAILED to give '%s' a squad", j->c_str());
+        }
+        b[sizeof(b) - 1] = '\0';
+        coopLog(b);
+        taken.insert(*j);
+        changed = true;
+    }
+    if (changed) coop::engine::refreshSquadTabs();
+    return created;
+}
+
+// EVERY client: who controls which tab, by name. A join owns the tab with its
+// name; the host owns every tab not named after a connected join.
+std::map<std::pair<coop::u32, coop::u32>, bool> g_lastTabOwn;
+void applyTabOwnership(GameWorld* gw) {
+    const std::string me = myPlayerName();
+    if (me.empty()) return;
+    std::vector<SquadTab> tabs;
+    listSquadTabs(gw, tabs);
+    const std::set<std::string> joins = connectedJoinNames();
+    std::map<std::pair<coop::u32, coop::u32>, bool> own;
+    for (size_t t = 0; t < tabs.size(); ++t)
+        own[tabs[t].key] = g_cfg.isHost ? (joins.count(tabs[t].name) == 0)
+                                        : (tabs[t].name == me);
+    if (own == g_lastTabOwn) return;
+    g_lastTabOwn = own;
+    g_repl.setTabNameOwnership(own);
+    std::string mine;
+    for (size_t t = 0; t < tabs.size(); ++t)
+        if (own[tabs[t].key]) mine += (mine.empty() ? "" : ", ") + tabs[t].name;
+    char b[200];
+    _snprintf(b, sizeof(b) - 1, "[names] I control: %s",
+              mine.empty() ? "(no tab yet)" : mine.c_str());
+    b[sizeof(b) - 1] = '\0';
+    coopLog(b);
+}
+
+void tickRoster(GameWorld* gw) {
+    ingestRoster();
+    DWORD now = GetTickCount();
+    if (g_cfg.isHost && g_peerPresent && g_net.isRunning() &&
+        (g_namesDirty || now - g_namesSentTick >= ROSTER_RESEND_MS)) {
+        for (std::map<coop::u32, std::string>::const_iterator it = g_names.begin();
+             it != g_names.end(); ++it) {
+            if (it->second.empty()) continue;
+            coop::RosterPacket p;
+            memset(&p, 0, sizeof(p));
+            p.type = (coop::u8)coop::PKT_ROSTER;
+            p.playerId = it->first;
+            size_t nl = it->second.size();
+            if (nl > coop::ROSTER_NAME_MAX) nl = coop::ROSTER_NAME_MAX;
+            p.nameLen = (coop::u8)nl;
+            memcpy(p.name, it->second.data(), nl);
+            g_net.queueRoster(p);
+        }
+        g_namesSentTick = now;
+    }
+    if (!realSession() || g_names.empty() || !gw || !g_gameStarted ||
+        !coop::engine::gameplayLive(gw)) return;
+    if (!g_namesDirty && now - g_namesApplyTick < NAMES_APPLY_MS) return;
+    g_namesApplyTick = now;
+    g_namesDirty = false;
+    applyTabOwnership(gw);
 }
 
 // Pre-save hook target: copy the save folder Kenshi is about to overwrite into
@@ -449,6 +603,9 @@ void sessionResetForWorldReload() {
 // starting with a peer already connected (mainLoop_hook gameplay-start edge).
 // Host + saveSync + in-game are the caller's responsibility.
 void armConnectPush() {
+    // Every connected player gets a named tab first: it rides in this save.
+    ingestRoster();
+    if (assignSquads(g_lastGw)) g_bootReloadHost = true;
     char cur[64];
     cur[0] = '\0';
     coop::engine::saveInfo(cur, sizeof(cur), 0, 0);
@@ -665,7 +822,18 @@ void driveSaveSync() {
                           rc == 1 ? "settled" : "timeout", g_savePending.c_str(),
                           files, bytes, waited);
                 b[sizeof(b) - 1] = '\0'; coopLog(b);
-                if (g_bootstrapArmed && g_savePending == g_bootstrapName) {
+                if (g_bootstrapArmed && g_savePending == g_bootstrapName && g_bootReloadHost) {
+                    // A character was created for a new player: its id in this
+                    // save differs from the live one, so the HOST loads the save
+                    // too - the coordinated load sends every join the same GO.
+                    g_bootReloadHost = false;
+                    std::string nm = g_bootstrapName;
+                    g_bootstrapArmed = false;
+                    g_bootstrapName.clear();
+                    g_savePending.clear();
+                    coopLog("[boot] new player squad: host reloads the save so all clients share its ids");
+                    if (!coop::engine::loadSave(nm)) coopErr("[boot] host reload FAILED to issue");
+                } else if (g_bootstrapArmed && g_savePending == g_bootstrapName) {
                     // Connect-push: announce the freshly-baked save with a
                     // LOAD_GO instead of a blind stream. The join loads it
                     // directly if its on-disk copy matches the fingerprint;
@@ -970,7 +1138,7 @@ void coopPanelDrive() {
     std::string detail;
     int ostate;
     if (g_peerPresent) {
-        detail = g_cfg.isHost ? "Connected - peer joined" : "Connected to host";
+        detail = g_cfg.isHost ? "Hosting - friends connected" : "Connected to host";
         ostate = 2;
         // Link health: ping (rounded to 10 ms so the panel does not rebuild on
         // every jitter) and reliable-packet loss when there is any. A weak link
@@ -992,7 +1160,7 @@ void coopPanelDrive() {
         ostate = 1;
     } else {
         char kb[96];
-        _snprintf(kb, sizeof(kb) - 1, "Offline - press F%d, then set Connection to ONLINE",
+        _snprintf(kb, sizeof(kb) - 1, "Offline - press F%d to host or join friends",
                   g_cfg.panelKeyVk - 0x70 + 1);
         kb[sizeof(kb) - 1] = '\0';
         detail = lastErr.empty() ? std::string(kb) : ("Offline - " + lastErr);
@@ -1041,13 +1209,49 @@ void coopPanelDrive() {
         &coop::steaminvite::inviteFriend, &coop::steaminvite::pickerActive,
         &coop::steaminvite::friendCount,  &coop::steaminvite::friendId,
         &coop::steaminvite::friendName,   &coop::steaminvite::friendState,
-        &coop::steaminvite::status
+        &coop::steaminvite::status,
+        &coop::steaminvite::hostLobby,    &coop::steaminvite::setBrowsing,
+        &coop::steaminvite::refreshGameList, &coop::steaminvite::gameCount,
+        &coop::steaminvite::gameName,     &coop::steaminvite::joinGame
     };
     ps.invite = &s_invite;
     ps.panelVk = g_cfg.panelKeyVk;
     ps.lastError = lastErr.c_str();
     ps.permBuild = g_permBuild; ps.permContainers = g_permContainers; ps.permBuy = g_permBuy;
     ps.onPermToggle = &onPermToggle;
+    // Simple view: hosting needs a loaded world; players by Steam name.
+    ps.inGame = g_gameStarted;
+    std::string players;
+    if (g_peerPresent || g_net.isRunning()) {
+        std::set<coop::u32> ids;
+        ids.insert(0);
+        if (g_cfg.isHost) ids.insert(g_peers.begin(), g_peers.end());
+        else for (std::map<coop::u32, std::string>::const_iterator it = g_names.begin();
+                  it != g_names.end(); ++it) ids.insert(it->first);
+        if (g_cfg.isHost || g_peerPresent) {
+            for (std::set<coop::u32>::const_iterator it = ids.begin(); it != ids.end(); ++it) {
+                std::map<coop::u32, std::string>::const_iterator nm = g_names.find(*it);
+                char fb[24];
+                _snprintf(fb, sizeof(fb) - 1, "Player %u", (unsigned)*it);
+                fb[sizeof(fb) - 1] = '\0';
+                if (!players.empty()) players += ", ";
+                players += (nm != g_names.end() && !nm->second.empty()) ? nm->second : std::string(fb);
+                if (*it == 0) players += " (host)";
+            }
+        }
+    }
+    ps.players = players.c_str();
+    loadPrefs();
+    ps.autoHost = g_autoHost;
+    ps.onAutoHostToggle = &onAutoHostToggle;
+    // Always host: once per loaded game, while offline and not on a scenario.
+    if (!g_gameStarted) g_autoHostDone = false;
+    if (g_autoHost && g_gameStarted && !g_autoHostDone && !g_net.isRunning()) {
+        g_autoHostDone = true;
+        coopLog("[coop-ui] always host: opening this game to friends");
+        coopUiConnect(true, true, 0);
+        coop::steaminvite::hostLobby();
+    }
 
     // Pump Steam callbacks: an inbound "Join Game" (a friend inviting US) fires
     // coopUiConnect, and the host's lobby/friend list advance here.

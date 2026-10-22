@@ -147,33 +147,34 @@ INSTALL (both players)
   (https://www.nexusmods.com/kenshi/mods/847), copy the "KenshiCoop" folder into
   <Kenshi>\mods\ and enable "KenshiCoop" in Kenshi's Mods menu.
 
-PREREQUISITES (both players)
+PREREQUISITES (every player)
 ----------------------------
-  1. Kenshi 1.0.65 or 1.0.68 (Steam or GOG).
-  2. For the Steam transport (recommended): Steam RUNNING and ONLINE on both
-     machines. No port forwarding, no IPs, no config editing - you swap Steam
-     IDs in-game (see PLAY below).
-  3. Both players need the SAME KenshiCoop release and the same enabled mods.
+  1. Kenshi 1.0.65 or 1.0.68 on Steam.
+  2. Steam RUNNING and ONLINE. No port forwarding, no IP addresses.
+  3. Everyone installs the SAME KenshiCoop release (the game refuses a
+     different version) and the same enabled mods.
 
-PLAY (Steam - recommended)
---------------------------
-  1. Press F2 to open the Co-op panel. It works at the MAIN MENU (before loading
-     a game) as well as in-game.
-  2. Swap Steam IDs: each player clicks "Copy my Steam ID" and sends it to the
-     other (Steam chat, Discord, etc.). When you receive your friend's ID, copy
-     it, then click "Paste friend's Steam ID" in your panel. The panel shows the
-     ID it captured. (This is per-session - re-paste it if you relaunch Kenshi.)
-  3. HOST: load the save you want to play (or start a new game), set Role: HOST,
-     leave Transport on STEAM, and toggle Connection to ONLINE.
-  4. JOIN: straight from the MAIN MENU - no save needed - set Role: JOIN, leave
-     Transport on STEAM, and toggle Connection to ONLINE. The host sends its
-     world to you on connect and you load right into it. (You do NOT need the
-     host's save beforehand. If you already have an identical copy on disk it is
-     used as-is instead of transferring.)
-  5. The white status line shows live state, and a status banner in the TOP-LEFT
-     corner shows it too - at the main menu as well as in-game, so a joining
-     player can watch the transfer before the world loads. Toggle Connection to
-     OFFLINE to leave.
+PLAY
+----
+  Press F2 for the Co-op panel (main menu or in game).
+
+  HOST - load your save or start a new game ("Multiplayer Wanderer" in
+  the New Game list is a ready two-squad start), press F2 and click
+  "Host for friends". Your game is now open to your Steam friends.
+  "Invite a Steam friend" also sends them a Steam invite.
+
+  JOIN - start Kenshi and stay at the MAIN MENU (no save needed). Press F2:
+  under "Join a friend" every Steam friend who is hosting is listed - click
+  "Join <name>'s game". The host's world is sent to you and loads by itself.
+
+  Each player controls their own squad tab, named after their Steam name. Any
+  game start works: a player without a tab gets a free one or a new character
+  of their own, and gets the same tab back next time.
+  The host's save is the shared save: only the host saves.
+  Leave with "Leave session" (join) or "Stop hosting" (host).
+
+  The old screens (role / transport / Steam ID copy-paste, LAN) are under
+  "Advanced (IP / Steam ID)" at the bottom of the panel.
 
 PLAY (LAN / direct UDP - advanced)
 ----------------------------------
@@ -203,6 +204,10 @@ TROUBLESHOOTING
   * "protocol mismatch": one player has an older/newer build; both should use
     the same release.
 '@ | Set-Content (Join-Path $kitDir "README.txt") -Encoding UTF8
+
+# Turkish install + test guide for players (tracked in docs/, shipped as-is).
+$trGuide = Join-Path $repoRoot "docs\KURULUM_TR.txt"
+if (Test-Path $trGuide) { Copy-Item $trGuide (Join-Path $kitDir "KURULUM_TR.txt") }
 
 # Provenance: assert the PACKAGED DLL is byte-identical to the canonical build,
 # then record the hash next to the kit so the release artifact is verifiable.

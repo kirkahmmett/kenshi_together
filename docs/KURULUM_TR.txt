@@ -1,0 +1,88 @@
+KenshiCoop - Kurulum ve Oynama Rehberi (Türkçe)
+================================================
+
+Bu paketi HER OYUNCU kurmalı ve herkes aynı zip'ten kurmalı; sürümler farklıysa
+bağlantı reddedilir. (Sürüm: PROVENANCE.json içinde "protocolVersion".)
+
+
+GEREKENLER
+----------
+  * Steam'den alınmış Kenshi (sürüm 1.0.68 ya da 1.0.65).
+  * Oynarken Steam AÇIK ve ÇEVRİMİÇİ olmalı.
+  * Kurulum sırasında internet (RE_Kenshi GitHub'dan indirilip doğrulanır).
+  * Port açmaya, IP girmeye, Steam ID kopyalamaya gerek YOK.
+
+
+KURULUM (her oyuncu)
+--------------------
+  1. Zip'e sağ tıkla > Özellikler > "Engellemeyi kaldır" kutusu varsa işaretle >
+     Tamam. Sonra zip'i bir klasöre çıkar.
+  2. Kenshi KAPALI olsun.
+  3. "KenshiCoop-Setup.cmd" dosyasına çift tıkla.
+     - "Bilgisayarınız korundu" çıkarsa: "Ek bilgi" > "Yine de çalıştır".
+     - Yönetici izni sorarsa "Evet".
+     - Yeşil "[ok]" satırları görmelisin; kırmızı hata çıkarsa fotoğrafını gönder.
+  4. Kenshi'yi Steam'den başlat. "Mods" uyarısı çıkarsa "Yes". Ana menüde
+     "RE_Kenshi 0.3.5" yazısını görüyorsan kurulum tamam.
+
+  Kenshi Steam kütüphanesinde değilse komut isteminde:
+     KenshiCoop-Setup.cmd -KenshiDir "D:\Oyunlar\Kenshi"
+
+
+OYNAMA
+------
+  Co-op paneli F2 ile açılır (ana menüde de, oyunda da). Panel yazıları
+  İngilizce.
+
+  HOST (oyunu açan kişi):
+    1. Kaydını yükle ya da istediğin başlangıçla yeni oyun aç. Hangi
+       başlangıç olursa olsun çalışır ("Multiplayer Wanderer" iki karakterle
+       başlar).
+    2. F2 > "Host for friends". Oyunun artık Steam arkadaşlarına açık.
+    3. İstersen "Invite a Steam friend" ile davet de gönderebilirsin.
+
+  JOIN (katılan kişi):
+    1. Kenshi'yi aç, ANA MENÜDE kal (kayıt yüklemene gerek yok).
+    2. F2 > "Join a friend" altında oyun açmış arkadaşların listelenir.
+       "Join <isim>'s game"e tıkla. Görmüyorsan "Refresh list".
+    3. Host'un dünyası sana gönderilir ve kendiliğinden yüklenir.
+
+  * Her oyuncu kendi takım sekmesini yönetir; sekme o oyuncunun Steam adını
+    taşır. Katılan oyuncunun sekmesi yoksa host otomatik olarak boş bir sekmeyi
+    ona verir ya da onun için yeni bir karakter ve sekme açar. Aynı oyuncu bir
+    dahaki girişinde aynı sekmeye döner.
+  * Kaydı HOST alır; join'in kendi kayıtları kapalıdır.
+  * Çıkmak için: join "Leave session", host "Stop hosting".
+  * Eski ayarlar (Role/Transport/Steam ID kopyala-yapıştır, LAN) panelin
+    altındaki "Advanced (IP / Steam ID)" içindedir.
+  * Host, panelden join'in inşaat / depo / satın alma izinlerini açıp kapatabilir.
+  * Kayıtların üzerine yazılmadan önce son 3 kopya yedeklenir:
+       %LOCALAPPDATA%\kenshi\KenshiCoop_backups\
+
+
+BU SÜRÜMDE DENEMENİ İSTEDİKLERİM
+--------------------------------
+  1. Join, ana menüde F2 > "Join a friend" listesinde host'u görüyor mu?
+     Tıklayınca bağlanıp dünyaya giriyor mu?
+  2. Host'un "Invite a Steam friend" daveti: join bildirime / sohbetteki
+     "Join game"e tıklayınca bağlanıyor mu?
+  3. Takım sekmelerinde Steam adları görünüyor mu? 3. oyuncu katılınca ona
+     otomatik sekme/karakter açıldı mı, ve herkes yalnızca kendi sekmesini mi
+     kontrol edebiliyor?
+  4. Join, host'un karakterinin envanterinden eşya yere atmaya çalışsın: atılmamalı.
+  Her biri için "oldu / olmadı + ne oldu" yaz.
+
+
+SORUN ÇIKARSA
+-------------
+  Kenshi klasöründen (genelde C:\Program Files (x86)\Steam\steamapps\common\Kenshi)
+  şu dosyaları gönder - Kenshi'yi YENİDEN AÇMADAN önce kopyala, açılınca silinir:
+     KenshiCoop_host.log  veya  KenshiCoop_join.log
+     RE_Kenshi_log.txt
+
+
+KALDIRMA
+--------
+  Zip'i çıkardığın klasörde komut isteminde:
+     KenshiCoop-Setup.cmd -Uninstall                   (sadece mod)
+     KenshiCoop-Setup.cmd -Uninstall -RemoveReKenshi   (RE_Kenshi de)

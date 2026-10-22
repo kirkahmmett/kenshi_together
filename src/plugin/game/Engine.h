@@ -752,6 +752,13 @@ void setJoinPermissions(bool build, bool containers, bool buy);
 // name, the "NAMELESS_0" label). A no-op when it already reads `name`.
 // Returns 1 renamed, 0 unchanged, -1 unresolved/fault.
 int setSquadNameByHand(const unsigned int hand[5], const char* name);
+// The squad-tab name of the character at hand[5] into out ("" on failure).
+// Returns 1 read, -1 unresolved/fault.
+int getSquadNameByHand(const unsigned int hand[5], char* out, unsigned int len);
+// Host (protocol 57): a new player character in a new squad tab named `name`,
+// spawned beside the leader - the tab a joining player without one gets.
+// Returns 1 created, -1 failed.
+int createPlayerSquad(GameWorld* gw, const char* name);
 // Refusal counter + the kind of the latest one (1 build, 2 storage, 3 buy), so
 // the plugin can show the player why an action did nothing.
 unsigned int permRefusalSeq();

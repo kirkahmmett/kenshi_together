@@ -83,7 +83,7 @@ in-game, so the joining player doesn't need to load anything first.
    you relaunch Kenshi.
 3. Leave **Transport** on **STEAM**.
 4. **Host:** load the save you want to play, or start a new game - pick
-   **Multiplayer (Wanderer x2)** from the start list for a ready-made two-squad
+   **Multiplayer Wanderer** from the start list for a ready-made two-squad
    co-op start (see below). Then set **Role: HOST** and toggle **Connection** to
    **ONLINE**.
 5. **Join:** straight from the **main menu** - no save needed - set
@@ -112,9 +112,9 @@ is needed after an edit.
   Game -> pick one from the list), both the vanilla Wanderer start with two
   wanderers already split into separate squads, so the host gets squad 1 and the
   joining player squad 2 with no manual tab-splitting:
-  - **"Multiplayer (Wanderer x2)"** - the plain version, vanilla in every other
+  - **"Multiplayer Wanderer"** - the plain version, vanilla in every other
     way. Authored by [zeroit789](https://github.com/zeroit789).
-  - **"Multiplayer+ (Wanderer x2)"** - the same start with **500,000 cats** and both
+  - **"Multiplayer+ Wanderer"** - the same start with **500,000 cats** and both
     characters at **50 in every stat**, for skipping the early grind. Kenshi has
     a single player wallet and co-op shares it, so the 500,000 is the pair's
     combined purse, not 500,000 each. The stats are a floor applied when the
@@ -176,7 +176,7 @@ scenario, and produces a numeric PASS/FAIL verdict from the two logs.
 - [BFrizzleFoShizzle](https://github.com/BFrizzleFoShizzle) - RE_Kenshi and
   KenshiLib, which make plugins like this possible
 - [lsalzman/enet](https://github.com/lsalzman/enet) - UDP networking library
-- [zeroit789](https://github.com/zeroit789) - the "Multiplayer (Wanderer x2)"
+- [zeroit789](https://github.com/zeroit789) - the "Multiplayer Wanderer"
   co-op game start ([#15](https://github.com/nhoral/KenshiCoop/pull/15))
 - Lo-Fi Games - Kenshi
 

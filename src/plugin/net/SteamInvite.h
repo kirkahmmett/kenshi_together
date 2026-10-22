@@ -54,6 +54,21 @@ void beginInvite();
 // queued and sent on completion.
 void inviteFriend(SteamId id);
 
+// "Host for friends" (protocol 57): the caller is ALREADY hosting (open Steam
+// host); this opens a friends-only lobby so Steam lists the game to friends and
+// invites can be sent. Players connect to the host themselves on entering.
+void hostLobby();
+
+// "Join a friend": friends playing Kenshi inside a lobby (read from Steam's
+// friend game info - no invite needed). The list refreshes every ~3 s while
+// browsing is on; joinGame(i) enters that lobby and connects as a join.
+void        setBrowsing(bool on);
+void        refreshGameList();
+int         gameCount();
+const char* gameName(int i);
+SteamId     gameHostId(int i);
+void        joinGame(int i);
+
 // In-panel picker accessors (main thread). The list is cached in our own buffers
 // (Steam's GetFriendPersonaName pointer is transient) and sorted in-Kenshi first.
 // friendState: 0 = offline, 1 = online, 2 = currently playing Kenshi.

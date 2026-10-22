@@ -22,3 +22,21 @@ build** after a bump.
 - Inbound queue `perms_` is session-preserving (survives a world swap).
 - Starting values: `joinCanBuild` / `joinCanUseContainers` / `joinCanBuy` in
   `coop_config.json` (or `KENSHICOOP_JOIN_BUILD` / `_CONTAINERS` / `_BUY`).
+
+## 57 - several joins, player names (three-player groundwork)
+
+- The host relays join-authored state packets to every other join verbatim, the
+  author's `ownerId` intact (entity batches, events, inventory, world items,
+  medical/stats, buildings, census, transfers, cell claims, deeds, fixtures).
+  Requests only the host acts on are not relayed.
+- Join ids are the lowest free 1..7 and equal the join's own squad tab, so a
+  rejoining player gets their tab back.
+- `PKT_PEER_LEFT = 50` (5 bytes, host -> joins): another join left; only the
+  host leaving ends a join's session.
+- `PKT_ROSTER = 51` (38 bytes, host -> joins): one player's display name. A join
+  sends its Steam name in HELLO (`nameLen` + bytes, previously always 0); every
+  client labels squad tab <id> with player <id>'s name.
+- Steam transport: a host admits every player whose Steam session is accepted
+  (no pasted id needed); each gets its own fake ENet address in the tunnel.
+- Not on the wire: save receive drains BEGIN/FILE/DONE atomically; players can no
+  longer drop items from another player's character.

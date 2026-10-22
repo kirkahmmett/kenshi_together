@@ -40,6 +40,14 @@ struct CoopInviteApi {
     const char*        (*friendName)(int i);
     int                (*friendState)(int i);
     const char*        (*status)();   // one-line invite status ("" when idle)
+    // Simple lobby flow (protocol 57): host opens a friends-only lobby once it is
+    // already hosting; joins browse friends' open games and join one directly.
+    void               (*hostLobby)();
+    void               (*setBrowsing)(bool on);
+    void               (*refreshGames)();
+    int                (*gameCount)();
+    const char*        (*gameName)(int i);
+    void               (*joinGame)(int i);
 };
 
 struct CoopPanelState {
@@ -68,6 +76,14 @@ struct CoopPanelState {
     // (0 build, 1 storage containers, 2 buying). Null callback = rows hidden.
     bool               permBuild, permContainers, permBuy;
     void               (*onPermToggle)(int which);
+    // Simple view: in a loaded game (hosting needs a world), and the session's
+    // players as one display line ("Ali (host), Veli"; null/"" = unknown).
+    bool               inGame;
+    const char*        players;
+    // "Always host my games": when on, the plugin opens every loaded game to
+    // friends by itself. The panel shows it as a switch.
+    bool               autoHost;
+    void               (*onAutoHostToggle)();
 };
 // The panel's role/transport selections at the moment Connect is hit. peerId is the
 // Steam ID pasted in-panel this session (0 if none), and overrides the config
@@ -86,6 +102,10 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
 // destroyed the widget (world load). Pass show=false to remove it. Main-thread
 // only; SEH-guarded.
 void coopOverlayTick(const char* text, int state, bool show);
+
+// Rebuild the main bar's squad tabs (their captions are cached) - call after
+// renaming a squad.
+void refreshSquadTabs();
 
 } // namespace engine
 } // namespace coop

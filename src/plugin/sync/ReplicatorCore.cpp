@@ -523,6 +523,8 @@ void Replicator::decideTabs(const EntityState* raw, unsigned int nSquad,
 }
 
 bool Replicator::ownsTab(const std::pair<u32, u32>& key, unsigned int rank) const {
+    std::map<std::pair<u32, u32>, bool>::const_iterator nm = tabNameOwned_.find(key);
+    if (nm != tabNameOwned_.end()) return nm->second;
     std::map<std::pair<u32, u32>, bool>::const_iterator it = tabOwned_.find(key);
     if (it != tabOwned_.end()) return it->second;
     // Not yet decided (squadSync_ off, or the first tick of a fresh container):

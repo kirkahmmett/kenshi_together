@@ -1022,6 +1022,11 @@ RecruitFn g_recruitFn = 0;
 // tick and plugin tick share the main thread, so the queue needs no lock.
 std::vector<RecruitEdgeRec> g_recruitEdges;
 RecruitFn g_recruitHookOrig = 0;
+// Set while createPlayerSquad recruits the character it made for a joining
+// player: that recruit must not travel as a sync edge - the host reloads the
+// save right after, and a late EVT_RECRUIT made a join re-squad its own new
+// character into the host's tab (measured 2026-10-22).
+static bool g_recruitEdgeSuppress = false;
 bool __fastcall recruit_hook(PlayerInterface* self, Character* c, bool editor) {
     unsigned int hb[5] = { 0, 0, 0, 0, 0 };
     bool haveBefore = false;
@@ -1029,7 +1034,7 @@ bool __fastcall recruit_hook(PlayerInterface* self, Character* c, bool editor) {
         if (c) { readObjectHand(static_cast<RootObject*>(c), hb); haveBefore = true; }
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     bool ok = g_recruitHookOrig(self, c, editor);
-    if (ok && haveBefore) {
+    if (ok && haveBefore && !g_recruitEdgeSuppress) {
         __try {
             RecruitEdgeRec e;
             memcpy(e.before, hb, sizeof(hb));
@@ -2280,6 +2285,66 @@ static int applySquadName(Character* c, const std::string& name) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return -1;
     }
+}
+
+static int readSquadName(Character* c, char* out, unsigned int len) {
+    __try {
+        ActivePlatoon* ap = g_getPlatoonFn(c);
+        if (!ap) return -1;
+        const std::string& n = g_platoonGetNameFn(ap);
+        unsigned int k = (unsigned int)n.size();
+        if (k >= len) k = len - 1;
+        memcpy(out, n.data(), k);
+        out[k] = '\0';
+        return 1;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -1;
+    }
+}
+
+int getSquadNameByHand(const unsigned int hand[5], char* out, unsigned int len) {
+    if (!out || len == 0) return -1;
+    out[0] = '\0';
+    if (!g_getPlatoonFn || !g_platoonGetNameFn) return -1;
+    Character* c = resolveCharByHand(hand[3], hand[4], hand[0], hand[1], hand[2]);
+    if (!c) return -1;
+    return readSquadName(c, out, len);
+}
+
+// Spawn a fresh character of the leader's race and faction beside the leader,
+// recruit it into the player's squads and split it into its own tab.
+static Character* spawnPlayerRecruit(GameWorld* gw) {
+    __try {
+        Character* ld = (gw->player && gw->player->playerCharacters.size())
+                            ? gw->player->playerCharacters[0] : 0;
+        if (!ld) return 0;
+        Faction* fac = ld->getFaction();
+        GameData* tmpl = ld->getGameData();
+        if (!fac || !tmpl) return 0;
+        Ogre::Vector3 pos; float yaw = 0.0f;
+        if (!leaderAnchor(gw, 3.0f, 2.0f, &pos, &yaw)) return 0;
+        RootObject* r = g_createCharFn(gw->theFactory, fac, pos, 0, tmpl, 0, 25.0f);
+        Character* c = r ? static_cast<Character*>(r) : 0;
+        if (!c) return 0;
+        g_recruitEdgeSuppress = true;
+        bool ok = g_recruitFn(gw->player, c, false);
+        g_recruitEdgeSuppress = false;
+        if (!ok) return 0;
+        g_separateSquadFn(c, true);
+        return c;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_recruitEdgeSuppress = false;
+        return 0;
+    }
+}
+
+int createPlayerSquad(GameWorld* gw, const char* name) {
+    if (!gw || !gw->theFactory || !name || !name[0] || !g_createCharFn || !g_recruitFn ||
+        !g_separateSquadFn || !g_getPlatoonFn || !g_platoonSetNameFn || !g_platoonGetNameFn)
+        return -1;
+    Character* c = spawnPlayerRecruit(gw);
+    if (!c) return -1;
+    return applySquadName(c, std::string(name)) >= 0 ? 1 : -1;
 }
 
 int setSquadNameByHand(const unsigned int hand[5], const char* name) {
