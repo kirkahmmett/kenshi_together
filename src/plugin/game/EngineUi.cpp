@@ -300,6 +300,8 @@ DataPanelLine_Button*   g_simpleBtn    = 0; // advanced -> simple
 DataPanelLine_Button*   g_leaveBtn     = 0;
 DataPanelLine_Button*   g_gameBtns[GAME_ROWS_MAX];
 std::string             g_lastSimpleSig;
+unsigned int            g_rebuilds = 0;     // panel rebuilds since the last report
+DWORD                   g_rebuildTick = 0;
 DataPanelLine_Button*   g_hostSetBtn   = 0; // host view: show/hide permission switches
 DataPanelLine_Button*   g_autoHostBtn  = 0; // "Always host my games"
 void                  (*g_autoHostToggleFn)() = 0;
@@ -783,6 +785,19 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
         }
     }
 
+    // Rebuild rate while open: a panel rebuilt every frame cannot be clicked,
+    // so this stays visible in the log (a handful per 10 s is normal).
+    if (GetTickCount() - g_rebuildTick >= 10000) {
+        if (g_rebuildTick != 0 && g_panel.open) {
+            char rb[80];
+            _snprintf(rb, sizeof(rb) - 1, "[coop-ui] panel rebuilds in 10 s: %u", g_rebuilds);
+            rb[sizeof(rb) - 1] = '\0';
+            coop::logLine(rb);
+        }
+        g_rebuilds = 0;
+        g_rebuildTick = GetTickCount();
+    }
+
     // ---- Simple view ------------------------------------------------------
     if (g_panel.panel && !g_panel.advanced) {
         const bool apiOk = g_inviteApi && g_inviteApi->ready && g_inviteApi->ready();
@@ -899,6 +914,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             }
 #undef ROW
             panelBuildSimpleSeh(g_panel.panel, &title, rows, n, &empty);
+            ++g_rebuilds;
             if (g_hostBtn)    g_hostBtn->callback    = MyGUI::newDelegate(&onHostBtn);
             if (g_refreshBtn) g_refreshBtn->callback = MyGUI::newDelegate(&onRefreshBtn);
             if (g_advBtn)     g_advBtn->callback     = MyGUI::newDelegate(&onAdvBtn);
@@ -919,6 +935,11 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             g_panel.lastStatus = detail;
             g_panel.lastTransfer = transfer;
             g_lastSimpleSig = sig;
+            // The advanced view's rebuild gates are compared every tick above;
+            // keep them current here too, or every tick reads "changed", the
+            // panel is rebuilt each frame and no button can be clicked.
+            g_lastInviteSig = inviteSig;
+            g_lastPermSig = permSig;
         }
     }
 

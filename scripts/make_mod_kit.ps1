@@ -31,7 +31,7 @@ param(
     [switch]$SkipBuild,
     # Release version shown in README/PROVENANCE and in the zip name
     # (major.PROTOCOL.patch: a new protocol bumps the middle number).
-    [string]$Version = "0.57.0",
+    [string]$Version = "0.57.1",
     # Where to find KenshiCoop.mod / RE_Kenshi.json if they aren't in dist\mods.
     [string]$HostDir = "C:\Program Files (x86)\Steam\steamapps\common\Kenshi"
 )

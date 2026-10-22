@@ -528,6 +528,9 @@ void tickRoster(GameWorld* gw) {
     if (!g_namesDirty && now - g_namesApplyTick < NAMES_APPLY_MS) return;
     g_namesApplyTick = now;
     g_namesDirty = false;
+    // Hosting with nobody connected yet: name our own tab now (no join, so
+    // assignSquads only renames - it never creates a character here).
+    if (g_cfg.isHost && g_net.isRunning() && g_peers.empty()) assignSquads(gw);
     applyTabOwnership(gw);
 }
 
