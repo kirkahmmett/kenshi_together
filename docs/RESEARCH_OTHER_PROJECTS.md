@@ -57,3 +57,42 @@ Lisans notu: iki proje de AGPL; kod alınırsa kaynak belirtilmeli.
 - https://www.nexusmods.com/kenshi/mods/2183 (403)
 - https://steamcommunity.com/sharedfiles/filedetails/?id=3808257125 (429)
 - https://kenshi.fandom.com/wiki/Kenshi_Unofficial_Multiplayer_Mod (402)
+
+## Brutalizer - "[BETA] KenshiCoop - Multiplayer (up to 8 players)" (Steam Workshop)
+
+Incelendi 2026-10-23: https://steamcommunity.com/sharedfiles/filedetails/?id=3822227842
+(kaynak: https://github.com/Savas07/KenshiCoop). Ayni nhoral tabanindan; adi bizimle ayni.
+Son surum v0.58.0 (21 Eki). Workshop'tan abone olunarak kurulur; RE_Kenshi ayrica Nexus'tan.
+
+Akisi: ana menu > MULTIPLAYER > HOST GAME > INVITE; arkadaslar daveti kabul eder ya da
+MULTIPLAYER'da host'un yanindaki JOIN. Host NEW/LOAD GAME der, lobidekiler dunyaya cekilir;
+yeni oyunda her katilan kendi karakterini normal editorde yapar. Surum lobinin sag ustunde.
+F2 kucuk panel (durum, davet, cik); LAN/IP F2 > Advanced.
+
+Iyi yaptiklari (ogrenilecek):
+- Dunya yuklenmeden ONCE ana menude lobi; herkes birlikte yeni oyuna girer.
+- Yeni oyunda her oyuncu KENDI karakterini yaratir (editor).
+- Tuccar kilidi: bir tuccarla ayni anda tek oyuncu takas yapar, stok/para devredilir
+  (bizim market senkronu sorununa basit bir cozum).
+- Ceset yagmasi kopyasi, arastirma kitabi, kayit aktarimi duzeltmeleri; Join Game rich presence.
+- Lobide surum gosterimi.
+
+Kotu / yorumlardaki sikayetler (bizim de dikkat etmemiz gerekenler):
+- Takasta esya kopyalanmasi/silinmesi: baskasinin envanterinden almak yerel kopyadan oluyor
+  (bizim "almayi engelle" isimiz tam bunu kapatiyor).
+- Mob kopyalari, bir oyuncunun gorup digerinin gormedigi NPC'ler, takilan kavgalar.
+- Tuccar stogu ilk etkilesene baglaniyor, digerleri 0 para/esya goruyor; bir tuccar crash.
+- Yere birakilan esya digerinde gorunmuyor; dunyada dizili esyalar kopyalaniyor.
+- Kapi muhafizinin baskasina diyalogu herkese aciliyor.
+- Irk/parca senkronu eksik (iskelet -> Shek).
+- Maden cevheri 2-3 kat geliyor; client'in squad'a aldigi kisi host'ta gorunmuyor.
+- Mod kontrolu yok (herkes ayni mod/sira olmali); RE_Kenshi'ye guvensizlik ("malware").
+- Kisayollar (F1-F3) host'ta calismiyor.
+
+Istekler: hiz artirma herkes ayni hizdaysa olsun; sunucu (dedicated) sistemi; mod kontrolu.
+
+Bizim fark yaratabilecegimiz yerler:
+- Tek tikla kurulum: RE_Kenshi'yi de bizim kurucu indirip dogruluyor (onlarda elle Nexus).
+- Away modu, host izinleri, almayi engelleme, dupe engelleri, yedekleme, Turkce rehber.
+- Kendi adimiz ve gorunumumuz (ad ayni - degistirilmeli).
+- Mod listesi kontrolu (onlarda yok) ve surum uyusmazliginda acik uyari.
