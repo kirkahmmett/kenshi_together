@@ -29,6 +29,9 @@
 [CmdletBinding()]
 param(
     [switch]$SkipBuild,
+    # Release version shown in README/PROVENANCE and in the zip name
+    # (major.PROTOCOL.patch: a new protocol bumps the middle number).
+    [string]$Version = "0.57.0",
     # Where to find KenshiCoop.mod / RE_Kenshi.json if they aren't in dist\mods.
     [string]$HostDir = "C:\Program Files (x86)\Steam\steamapps\common\Kenshi"
 )
@@ -125,7 +128,7 @@ foreach ($f in "KenshiCoop-Setup.cmd", "KenshiCoop-Setup.ps1") {
 # Top-level README (sibling to the KenshiCoop folder, so it is NOT copied into
 # the game).
 @'
-KenshiCoop - co-op mod
+KenshiCoop __VERSION__ - co-op mod
 ======================
 
 INSTALL (both players)
@@ -204,6 +207,8 @@ TROUBLESHOOTING
   * "protocol mismatch": one player has an older/newer build; both should use
     the same release.
 '@ | Set-Content (Join-Path $kitDir "README.txt") -Encoding UTF8
+$readme = Join-Path $kitDir "README.txt"
+(Get-Content $readme -Raw).Replace('__VERSION__', $Version) | Set-Content $readme -Encoding UTF8
 
 # Turkish install + test guide for players (tracked in docs/, shipped as-is).
 $trGuide = Join-Path $repoRoot "docs\KURULUM_TR.txt"
@@ -224,6 +229,7 @@ $proto = if ($protoLine) { $protoLine.Matches[0].Groups[1].Value } else { "?" }
     protocolVersion = $proto
     builtUtc        = (Get-Date).ToUniversalTime().ToString("o")
     config          = "Release"
+    version         = $Version
 } | ConvertTo-Json | Set-Content (Join-Path $kitDir "PROVENANCE.json") -Encoding UTF8
 Write-Host "Packaged DLL SHA-256 verified == canonical."
 
