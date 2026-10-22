@@ -25,6 +25,8 @@
 #ifndef KENSHICOOP_STEAMINVITE_H
 #define KENSHICOOP_STEAMINVITE_H
 
+#include <string>
+
 namespace coop {
 namespace steaminvite {
 
@@ -67,6 +69,9 @@ void tick();
 
 // One-line human status for the panel/overlay (never null; "" when idle).
 const char* status();
+
+// Our own Steam persona name ("" when Steam's friends interface is unavailable).
+std::string selfName();
 
 // Leave any lobby and clear invite state (called on disconnect / teardown).
 void reset();

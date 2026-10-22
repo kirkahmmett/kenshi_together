@@ -121,6 +121,7 @@ static void testSizes() {
     CHECK_EQ("sizeof(FixturePacket)",           sizeof(FixturePacket),           90); // v55: fixture identity
     CHECK_EQ("sizeof(PermsPacket)",             sizeof(PermsPacket),             8);  // v56: join permissions
     CHECK_EQ("sizeof(PeerLeftPacket)",          sizeof(PeerLeftPacket),          5);  // v57: three players
+    CHECK_EQ("sizeof(RosterPacket)",            sizeof(RosterPacket),            38); // v57: player names
     CHECK_EQ("sizeof(CamHintPacket)",           sizeof(CamHintPacket),           17); // v43: camera hint
     CHECK_EQ("sizeof(CellClaimPacket)",         sizeof(CellClaimPacket),         21); // v49: cell claim
     CHECK_EQ("sizeof(InvXferAckPacket)",        sizeof(InvXferAckPacket),        18); // v50: transfer verdict
@@ -500,6 +501,7 @@ static void testRoundTrips() {
     roundTrip<FixturePacket>("FixturePacket", (u8)PKT_FIXTURE);
     roundTrip<PermsPacket>("PermsPacket", (u8)PKT_PERMS);
     roundTrip<PeerLeftPacket>("PeerLeftPacket", (u8)PKT_PEER_LEFT);
+    roundTrip<RosterPacket>("RosterPacket", (u8)PKT_ROSTER);
     roundTrip<CellClaimPacket>("CellClaimPacket", (u8)PKT_CELL_CLAIM);
     roundTrip<InvXferAckPacket>("InvXferAckPacket", (u8)PKT_INV_XFER_ACK);
 

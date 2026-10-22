@@ -122,6 +122,8 @@ FrGetByIndexFn        g_frByIndex   = 0;
 FrGetNameFn           g_frName      = 0;
 FrGetStateFn          g_frState     = 0;
 FrGetGamePlayedFn     g_frGame      = 0;
+typedef const char* (*FrSelfNameFn)(void* friends);
+FrSelfNameFn          g_frSelfName  = 0;
 RegisterCbFn          g_regCb       = 0;
 RegisterCrFn          g_regCr       = 0;
 UnregisterCbFn        g_unregCb     = 0;
@@ -357,6 +359,7 @@ bool init(ConnectFn onConnect) {
     g_frCount     = (FrGetCountFn)         GetProcAddress(mod, "SteamAPI_ISteamFriends_GetFriendCount");
     g_frByIndex   = (FrGetByIndexFn)       GetProcAddress(mod, "SteamAPI_ISteamFriends_GetFriendByIndex");
     g_frName      = (FrGetNameFn)          GetProcAddress(mod, "SteamAPI_ISteamFriends_GetFriendPersonaName");
+    g_frSelfName  = (FrSelfNameFn)         GetProcAddress(mod, "SteamAPI_ISteamFriends_GetPersonaName");
     g_frState     = (FrGetStateFn)         GetProcAddress(mod, "SteamAPI_ISteamFriends_GetFriendPersonaState");
     g_frGame      = (FrGetGamePlayedFn)    GetProcAddress(mod, "SteamAPI_ISteamFriends_GetFriendGamePlayed");
     g_regCb       = (RegisterCbFn)         GetProcAddress(mod, "SteamAPI_RegisterCallback");
@@ -507,6 +510,12 @@ void tick() {
 }
 
 const char* status() { return g_status; }
+
+std::string selfName() {
+    if (!g_friends || !g_frSelfName) return std::string();
+    const char* n = g_frSelfName(g_friends);
+    return n ? std::string(n) : std::string();
+}
 
 void reset() {
     if (g_ready && g_lobby != 0 && g_leaveLobby) g_leaveLobby(g_mm, g_lobby);

@@ -747,6 +747,11 @@ void setBlockXfer(bool on);
 // the JOIN in the build-commit, buyItem and inventory-add detours. Everything
 // allowed until the host says otherwise; the host itself never calls this.
 void setJoinPermissions(bool build, bool containers, bool buy);
+
+// Protocol 57: name the squad tab of the character at hand[5] (ActivePlatoon
+// name, the "NAMELESS_0" label). A no-op when it already reads `name`.
+// Returns 1 renamed, 0 unchanged, -1 unresolved/fault.
+int setSquadNameByHand(const unsigned int hand[5], const char* name);
 // Refusal counter + the kind of the latest one (1 build, 2 storage, 3 buy), so
 // the plugin can show the player why an action did nothing.
 unsigned int permRefusalSeq();
@@ -776,9 +781,12 @@ int probeAddAnyToContainer(GameWorld* gw, const unsigned int cHand[5], int qty,
 // a worn CONTAINER (backpack): unequip-to-loose cannot stage it first, because no loose
 // section has room for a bag that large, and the fallback add re-equips it - yet the UI
 // drags a worn backpack to the ground just fine, so dropItem accepts a worn item directly.
+// asPlayer: drop exactly as a player's own UI drop would, i.e. subject to the
+// drop-from-another-player veto (protocol 57). Sync callers leave it false.
 int dropItemFromInventory(GameWorld* gw, const unsigned int cHand[5],
                           const char* sid, unsigned int typeCat, int qty,
-                          void** outLastDropped = 0, bool allowEquipped = false);
+                          void** outLastDropped = 0, bool allowEquipped = false,
+                          bool asPlayer = false);
 
 // SEH-guarded DIAGNOSTIC: enumerate WEAPON/ARMOUR/ITEM/CONTAINER world objects near the
 // local leader and log each (itemType / sid / hand / pos), so we can characterize what a

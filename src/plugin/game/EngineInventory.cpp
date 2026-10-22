@@ -898,7 +898,9 @@ int dropItemFromNestedContainer(GameWorld* gw, const unsigned int cHand[5], cons
                     victim = curItems[i]; break;
                 }
                 if (!victim) break;
+                bool sav = g_invVetoSuspend; g_invVetoSuspend = true; // our own drop
                 sub->dropItem(victim);                          // virtual: bag -> ground
+                g_invVetoSuspend = sav;
                 if (outLastDropped) *outLastDropped = victim;    // the now-grounded object
                 if (++dropped >= qty) break;
             }
@@ -1437,7 +1439,7 @@ void dumpInventory(GameWorld* gw, const unsigned int cHand[5]) {
 // removes it from the bag and places it as a world object. Returns the number dropped.
 int dropItemFromInventory(GameWorld* gw, const unsigned int cHand[5],
                           const char* sid, unsigned int typeCat, int qty,
-                          void** outLastDropped, bool allowEquipped) {
+                          void** outLastDropped, bool allowEquipped, bool asPlayer) {
     if (outLastDropped) *outLastDropped = 0;
     if (!gw || !sid || !sid[0] || qty <= 0) return 0;
     RootObject* ro = resolveObjectByHand(cHand);
@@ -1465,7 +1467,11 @@ int dropItemFromInventory(GameWorld* gw, const unsigned int cHand[5],
                 }
             }
             if (!victim) break;
+            // Our own drop (often applying the OWNER's drop to our copy of their
+            // character): exempt from the drop-from-another-player veto.
+            bool sav = g_invVetoSuspend; if (!asPlayer) g_invVetoSuspend = true;
             inv->dropItem(victim);                             // virtual: bag -> ground
+            g_invVetoSuspend = sav;
             if (outLastDropped) *outLastDropped = victim;      // the now-grounded object
             ++dropped;
         }

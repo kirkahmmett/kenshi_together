@@ -2537,6 +2537,101 @@ private:
 };
 const float InvDumpAllScenario::RADIUS = 60.0f;
 
+// drop_peer_refused (protocol 57): a player may drop items from their OWN
+// characters only. The JOIN, acting as a player (engine::dropItemFromInventory
+// asPlayer=true, the same Inventory::dropItem a UI drop calls), drops one probe
+// item from the HOST's tab leader (must be refused: the host's client keeps
+// publishing that bag, so a local drop would duplicate the item) and one from its
+// own tab leader (must go through). Both sides seed their own leader at 6 s.
+class DropPeerRefusedScenario : public TimedScenario {
+public:
+    DropPeerRefusedScenario()
+        : TimedScenario("drop_peer_refused", 0), type_(0), haveHost_(false),
+          haveOwn_(false), seeded_(false), tried_(false), hostBefore_(-1),
+          hostAfter_(-1), ownBefore_(-1), ownAfter_(-1) {
+        sid_[0] = '\0';
+        memset(hostLeader_, 0, sizeof(hostLeader_));
+        memset(ownLeader_, 0, sizeof(ownLeader_));
+    }
+
+    virtual void onStart(const ScenarioContext& ctx) {
+        engine::commonTestItemSid(ctx.gw, sid_, sizeof(sid_), &type_);
+        EntityState sq[32];
+        unsigned int n = engine::captureSquad(ctx.gw, /*leaderOnly*/ false, sq, 32);
+        int h = tabLeaderIdx(sq, n, 0), o = tabLeaderIdx(sq, n, 1);
+        if (h >= 0) { handFromEntity(sq[h], hostLeader_); haveHost_ = true; }
+        if (o >= 0) { handFromEntity(sq[o], ownLeader_);  haveOwn_  = true; }
+        char b[160];
+        _snprintf(b, sizeof(b) - 1, "SCENARIO DPR start host=%d tab0=%d tab1=%d sid='%s'",
+                  ctx.isHost ? 1 : 0, haveHost_ ? 1 : 0, haveOwn_ ? 1 : 0, sid_);
+        b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+    }
+
+    virtual bool onTick(const ScenarioContext& ctx) {
+        if (!seeded_ && ctx.elapsedMs >= SEED_MS) {
+            seeded_ = true;
+            const unsigned int* mine = ctx.isHost ? hostLeader_ : ownLeader_;
+            if ((ctx.isHost ? haveHost_ : haveOwn_)) {
+                char sid[48]; sid[0] = '\0';
+                engine::addTestItemsToContainer(ctx.gw, mine, 3, sid, sizeof(sid));
+            }
+        }
+        if (!ctx.isHost && !tried_ && ctx.elapsedMs >= TRY_MS && haveHost_ && haveOwn_ &&
+            sid_[0]) {
+            tried_ = true;
+            hostBefore_ = count(ctx.gw, hostLeader_);
+            ownBefore_  = count(ctx.gw, ownLeader_);
+            engine::dropItemFromInventory(ctx.gw, hostLeader_, sid_, type_, 1, 0, false,
+                                          /*asPlayer*/ true);
+            hostAfter_ = count(ctx.gw, hostLeader_);
+            engine::dropItemFromInventory(ctx.gw, ownLeader_, sid_, type_, 1, 0, false,
+                                          /*asPlayer*/ true);
+            ownAfter_ = count(ctx.gw, ownLeader_);
+            char b[200];
+            _snprintf(b, sizeof(b) - 1,
+                      "SCENARIO DPR drop hostBefore=%d hostAfter=%d ownBefore=%d ownAfter=%d",
+                      hostBefore_, hostAfter_, ownBefore_, ownAfter_);
+            b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+        }
+        if (ctx.elapsedMs >= DURATION_MS) {
+            if (ctx.isHost) {
+                passed_ = true;
+            } else {
+                passed_ = tried_ && hostBefore_ > 0 && hostAfter_ == hostBefore_ &&
+                          ownBefore_ > 0 && ownAfter_ == ownBefore_ - 1;
+                char b[96];
+                _snprintf(b, sizeof(b) - 1, "SCENARIO DPR verdict ok=%d", passed_ ? 1 : 0);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+            return true;
+        }
+        return false;
+    }
+
+private:
+    int count(GameWorld* gw, const unsigned int h[5]) {
+        InvItemEntry items[INV_ITEMS_MAX];
+        unsigned int hash = 0;
+        unsigned int n = engine::captureContainerContents(gw, h, items, INV_ITEMS_MAX, &hash);
+        int q = 0;
+        for (unsigned int i = 0; i < n; ++i)
+            if (items[i].itemType == type_ && strcmp(items[i].stringID, sid_) == 0)
+                q += (int)items[i].quantity;
+        return q;
+    }
+
+    static const unsigned long SEED_MS     = 6000;
+    static const unsigned long TRY_MS      = 16000;
+    static const unsigned long DURATION_MS = 24000;
+
+    char         sid_[48];
+    unsigned int type_;
+    bool         haveHost_, haveOwn_, seeded_, tried_;
+    int          hostBefore_, hostAfter_, ownBefore_, ownAfter_;
+    unsigned int hostLeader_[5];
+    unsigned int ownLeader_[5];
+};
+
 Scenario* makeInventoryScenario(const std::string& name) {
     // Same scenario twice: the plain run proves the round trip converges, and the
     // _refuse run drives it with the first re-home refused (KENSHICOOP_WD_REFUSE_REHOME),
@@ -2575,6 +2670,7 @@ Scenario* makeInventoryScenario(const std::string& name) {
     if (name == "trade_probe")  return new TradeScenario(/*peer=*/false);
     if (name == "trade_peer")   return new TradeScenario(/*peer=*/true);
     if (name == "xfer_block")   return new XferBlockScenario();
+    if (name == "drop_peer_refused") return new DropPeerRefusedScenario();
     if (name == "inv_equip")    return new InventoryEquipScenario(/*reequip=*/false);
     if (name == "inv_reequip")  return new InventoryEquipScenario(/*reequip=*/true);
     if (name == "inv_wpnseq")   return new WeaponSeqScenario();

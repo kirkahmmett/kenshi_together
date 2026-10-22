@@ -73,8 +73,13 @@ param(
     [int]$ScenarioWaitSec = 25,
     [switch]$Arrange,
     [switch]$NoArrange,
-    [ValidateSet("widest", "primary")]
-    [string]$ArrangeMonitor = "primary",
+    [ValidateSet("widest", "primary", "secondary")]
+    # "secondary" by default: tests run on the second monitor so the main one stays
+    # free for the user (falls back to the primary on a single-monitor machine).
+    [string]$ArrangeMonitor = "secondary",
+    # Test window size (both clients).
+    [int]$VideoWidth = 1024,
+    [int]$VideoHeight = 768,
     [int]$ArrangeRepeatSec = 75,
     # Legacy in-plugin WAN sim (inbound ENTITY batches only, above ENet). Kept for
     # targeted entity-only experiments; full-fidelity WAN testing should use -Wan.
@@ -406,13 +411,13 @@ function Start-PastLauncher {
     return 0
 }
 
-# Automated layout: 1280x1024 pair on the PRIMARY (laptop) monitor - the
-# screenshot-stable baseline. Written every run because manual_session.ps1
-# resizes the same kenshi.cfg files for the ultrawide manual layout; this
-# guarantees automated runs always come back to the known-good geometry.
-Write-Host "Window layout: automated (1280x1024 x2, $ArrangeMonitor monitor)"
+# Automated layout: a small pair (1024x768 by default - Kenshi resets 800x600 to the desktop size) on the SECOND monitor, so
+# the test takes little room and the user keeps the main screen. No oracle reads
+# the window size. Written every run because manual_session.ps1 resizes the same
+# kenshi.cfg files for the ultrawide manual layout.
+Write-Host "Window layout: automated (${VideoWidth}x${VideoHeight} x2, $ArrangeMonitor monitor)"
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scriptDir "set_video_mode.ps1") `
-    -Width 1280 -Height 1024 -HostDir $HostDir -JoinDir $JoinDir
+    -Width $VideoWidth -Height $VideoHeight -HostDir $HostDir -JoinDir $JoinDir
 
 Write-Host "Launching HOST (and clicking through the launcher) ..."
 Set-CoopEnv -Mode "host" -Log $hostLog
@@ -447,7 +452,10 @@ if (-not $NoArrange -and $hostPid -ne 0) {
     Start-Process -WindowStyle Hidden -FilePath "powershell" -ArgumentList @(
         "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$arrangeScript`"",
         "-HostPid", "$hostPid", "-JoinPid", "$joinPid",
-        "-Monitor", $ArrangeMonitor, "-TimeoutSec", "90", "-RepeatSec", "$ArrangeRepeatSec"
+        "-Monitor", $ArrangeMonitor, "-TimeoutSec", "90", "-RepeatSec", "$ArrangeRepeatSec",
+        # Hold the client size too: Kenshi can come up at the desktop size when it
+        # rejects the configured video mode.
+        "-ClientW", "$VideoWidth", "-ClientH", "$VideoHeight"
     ) | Out-Null
 }
 

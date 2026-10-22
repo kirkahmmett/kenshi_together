@@ -27,9 +27,11 @@ param(
     # so the labels can swap. Pass these whenever you know them.
     [int]$HostPid = 0,
     [int]$JoinPid = 0,
-    # Which monitor to stage on: "widest" (default, e.g. an ultrawide - most room) or
-    # "primary" (the monitor at virtual origin 0,0, i.e. the main laptop/desktop screen).
-    [ValidateSet("widest", "primary")]
+    # Which monitor to stage on: "widest" (default, e.g. an ultrawide - most room),
+    # "primary" (the monitor at virtual origin 0,0, i.e. the main laptop/desktop screen)
+    # or "secondary" (the first monitor that is NOT the primary, so the user keeps the
+    # main screen; falls back to the primary on a single-monitor machine).
+    [ValidateSet("widest", "primary", "secondary")]
     [string]$Monitor = "widest",
     # Keep re-applying the placement for this many seconds. Kenshi re-centers its
     # window when it switches from the load screen to gameplay, so a one-shot move
@@ -160,7 +162,14 @@ if ($wins.Count -lt 1) { Write-Warning "No Kenshi game windows found within $Tim
 # Pick the staging monitor: "primary" is the one at the virtual origin (0,0); else
 # the widest (e.g. an ultrawide), which has the most room for two windows.
 $mons = [WinArrange]::Monitors()
-if ($Monitor -eq "primary") {
+$isPrimary = { param($m) $m.Left -le 0 -and $m.Top -le 0 -and $m.Right -gt 0 -and $m.Bottom -gt 0 }
+if ($Monitor -eq "secondary") {
+    $mon = $mons | Where-Object { -not (& $isPrimary $_) } | Select-Object -First 1
+    if ($null -eq $mon) { $Monitor = "primary" }
+}
+if ($Monitor -eq "secondary") {
+    # chosen above
+} elseif ($Monitor -eq "primary") {
     $mon = $mons | Where-Object { $_.Left -le 0 -and $_.Top -le 0 -and $_.Right -gt 0 -and $_.Bottom -gt 0 } | Select-Object -First 1
     if ($null -eq $mon) { $mon = $mons | Sort-Object { ($_.Left * $_.Left) + ($_.Top * $_.Top) } | Select-Object -First 1 }
 } else {
@@ -217,12 +226,20 @@ function Set-Placement {
     $slotH = ($sizes | Measure-Object -Property H -Maximum).Maximum
     $gap = $GapPx
     $total = ($slotW * 2) + $gap
-    if ($total -gt $monW) { $gap = 0; $total = $slotW * 2 }
-    $startX = $mon.Left + [int][Math]::Max(0, ($monW - $total) / 2)
+    $step = $slotW + $gap
+    if ($total -gt $monW) {
+        # Too wide for side by side: overlap rather than spill onto another monitor
+        # (the second window's right edge stays on the staging monitor).
+        $gap = 0; $total = $slotW * 2
+        $step = [Math]::Max(0, $monW - $slotW)
+        $startX = $mon.Left
+    } else {
+        $startX = $mon.Left + [int][Math]::Max(0, ($monW - $total) / 2)
+    }
     $y = $mon.Top + [int][Math]::Max(0, ($monH - $slotH) / 2)
     $labels = @("host (left)", "join (right)")
     for ($i = 0; $i -lt $ord.Count -and $i -lt 2; $i++) {
-        $x = $startX + ($i * ($slotW + $gap))
+        $x = $startX + ($i * $step)
         $tw = $sizes[$i].W; $th = $sizes[$i].H
         if ($enforceSize) {
             # Skip the resize when already conformant (a same-size SetWindowPos is

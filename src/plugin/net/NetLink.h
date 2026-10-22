@@ -145,6 +145,10 @@ public:
     // MAIN thread (host): queue the join-permission set (protocol 56). Sent on
     // connect, on change and on a slow safety resend by the caller.
     void queuePerms(const PermsPacket& pkt);
+    // Protocol 57: host -> joins, one player's display name.
+    void queueRoster(const RosterPacket& pkt);
+    // Our display name, sent in HELLO by a join. Call before start().
+    void setLocalName(const std::string& name) { localName_ = name; }
     void queueBuildPlace(const BuildPlacePacket& pkt);
     void queueBuildState(const BuildStatePacket& pkt);
     void queueBuildDoor(const BuildDoorPacket& pkt);
@@ -324,6 +328,8 @@ private:
     std::vector<FixturePacket>   outFixture_;
     // Reliable join-permission sets (protocol 56, host -> join). Guarded by outCs_.
     std::vector<PermsPacket>     outPerms_;
+    std::vector<RosterPacket>    outRoster_;
+    std::string                  localName_;
     std::vector<BuildPlacePacket> outBuildPlace_;
     std::vector<BuildStatePacket> outBuildState_;
     std::vector<BuildDoorPacket>  outBuildDoor_;

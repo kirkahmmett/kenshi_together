@@ -664,6 +664,11 @@ typedef void  (__fastcall* PlatoonRefreshInvFn)(ActivePlatoon* self, bool firstT
 // (it may resolve the trader lazily / from a different field).
 typedef Character* (__fastcall* ShopGetTraderFn)(const ShopTrader* self);
 GetPlatoonFn  g_getPlatoonFn  = 0;
+// Squad-tab naming (protocol 57): ActivePlatoon::setName / getName.
+typedef void               (__fastcall* PlatoonSetNameFn)(ActivePlatoon* self, const std::string& n);
+typedef const std::string& (__fastcall* PlatoonGetNameFn)(const ActivePlatoon* self);
+PlatoonSetNameFn g_platoonSetNameFn = 0;
+PlatoonGetNameFn g_platoonGetNameFn = 0;
 OwnGetMoneyFn g_ownGetMoneyFn = 0;
 OwnSetMoneyFn g_ownSetMoneyFn = 0;
 BuyItemFn     g_buyItemFn     = 0;
@@ -929,7 +934,38 @@ typedef void (__fastcall* DropItemFn)(Inventory* self, Item* it);
 DropItemFn g_dropItemOrig = 0;
 std::vector<ItemDropEdge> g_dropEdges;
 
+// Is `it` still listed in `inv`? (A UI drag holds it on the cursor instead.)
+static bool invListsItem(Inventory* inv, Item* it) {
+    lektor<Item*>& all = inv->_allItems;
+    for (unsigned int i = 0; i < all.size(); ++i) if (all[i] == it) return true;
+    return false;
+}
+
 void __fastcall dropItem_hook(Inventory* self, Item* it) {
+    // A player may not drop another player's items. The owner's client keeps
+    // publishing that character's inventory, so the item would stay with them AND
+    // lie on our ground - a duplicate. Our own sync drops (applying the owner's
+    // drop to our copy of their character) run with the veto suspended.
+    if (!g_invVetoSuspend && g_invOwnerClass && self && it) {
+        bool refuse = false;
+        __try {
+            unsigned int oh[5] = { 0, 0, 0, 0, 0 };
+            refuse = ownerHandOfInventory(self, oh) && g_invOwnerClass(oh) == 2;
+            if (refuse && !invListsItem(self, it)) {
+                // Dragged out to the ground: put it back where it came from.
+                g_invVetoSuspend = true;
+                if (g_tryAddItemOrig) g_tryAddItemOrig(self, it, 1);
+                else                  self->tryAddItem(it, 1);
+                g_invVetoSuspend = false;
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) { g_invVetoSuspend = false; }
+        if (refuse) {
+            coop::logLine("[xfer] REFUSED drop from another player's character "
+                          "(only its owner can drop its items)");
+            g_pendRemItem = 0; g_pendRemInv = 0; g_havePendRemOwner = false;
+            return;
+        }
+    }
     g_dropItemOrig(self, it);
     // A drop may internally remove the item (setting the veto's pending-remove
     // state) but is NOT a bag->bag transfer, so invalidate any pending remove here
@@ -1723,6 +1759,8 @@ void resolve() {
     // Money + vendor trading (protocol 22 groundwork; non-fatal: unresolved ->
     // wallet reads return -1 and the shop_probe logs the gap).
     g_getPlatoonFn  = (GetPlatoonFn)KenshiLib::GetRealAddress(&Character::getPlatoon);
+    g_platoonSetNameFn = (PlatoonSetNameFn)KenshiLib::GetRealAddress(&ActivePlatoon::setName);
+    g_platoonGetNameFn = (PlatoonGetNameFn)KenshiLib::GetRealAddress(&ActivePlatoon::getName);
     g_ownGetMoneyFn = (OwnGetMoneyFn)KenshiLib::GetRealAddress(&Ownerships::getMoney);
     g_ownSetMoneyFn = (OwnSetMoneyFn)KenshiLib::GetRealAddress(&Ownerships::setMoney);
     g_buyItemFn     = (BuyItemFn)KenshiLib::GetRealAddress(&Inventory::buyItem);
@@ -2231,6 +2269,27 @@ bool installXferBlockHook() {
 }
 
 void setBlockXfer(bool on)                    { g_blockXfer = on; }
+// SEH frame with no C++ objects of its own (the name is built by the caller).
+static int applySquadName(Character* c, const std::string& name) {
+    __try {
+        ActivePlatoon* ap = g_getPlatoonFn(c);
+        if (!ap) return -1;
+        if (g_platoonGetNameFn(ap) == name) return 0;
+        g_platoonSetNameFn(ap, name);
+        return 1;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -1;
+    }
+}
+
+int setSquadNameByHand(const unsigned int hand[5], const char* name) {
+    if (!name || !name[0] || !g_getPlatoonFn || !g_platoonSetNameFn || !g_platoonGetNameFn)
+        return -1;
+    Character* c = resolveCharByHand(hand[3], hand[4], hand[0], hand[1], hand[2]);
+    if (!c) return -1;
+    return applySquadName(c, std::string(name));
+}
+
 void setJoinPermissions(bool build, bool containers, bool buy) {
     if (build != g_permBuild || containers != g_permContainers || buy != g_permBuy) {
         char b[112];

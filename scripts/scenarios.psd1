@@ -1515,6 +1515,16 @@
         # the item stays put. perm_storage_allow is the same take with the
         # default (allowed) and must go through. No channel is needed: the
         # permissions packet is always sent, and the join acts on its own world.
+        # drop_peer_refused (protocol 57): a join cannot drop items from the
+        # host's character (that would duplicate them) but can from its own.
+        drop_peer_refused = @{
+            DiagEnv = @{ KENSHICOOP_INV_SYNC = '1'; KENSHICOOP_WORLD_SYNC = '1' }
+            Save = 'squad1'; Setup = ''; Tolerance = 3.0
+            PrimaryGate = 'drop_peer_refused'
+            Gating   = @('drop_peer_refused')
+            Advisory = @()
+            Tier = 'full'; WanVariant = $false
+        }
         perm_storage = @{
             DiagEnv = @{ KENSHICOOP_JOIN_CONTAINERS = '0' }
             Save = 'squad1'; Setup = ''; Tolerance = 3.0

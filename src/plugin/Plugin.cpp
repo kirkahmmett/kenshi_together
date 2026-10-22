@@ -35,6 +35,7 @@
 #include "net/NetLink.h"
 #include "net/SteamP2P.h"
 #include "net/SteamInvite.h"
+#include <algorithm>
 #include "game/Engine.h"
 #include "game/EngineUi.h"       // Phase 5a: F2 co-op panel + status overlay
 #include "game/EngineScenario.h" // Phase 5a: auto-bake scene builders
@@ -253,6 +254,16 @@ unsigned int  g_permRefusalSeen = 0;  // join: refusals already announced
 DWORD         g_permNoticeTick = 0;
 int           g_permNoticeKind = 0;
 const DWORD   PERM_RESEND_MS = 10000;
+
+// Player names on the squad tabs (protocol 57): id -> Steam name. The host
+// learns each join's from its HELLO and sends the whole roster on connect and
+// every ROSTER_RESEND_MS; every client names tab <id> after player <id>.
+std::map<coop::u32, std::string> g_names;
+bool          g_namesDirty = false;
+DWORD         g_namesSentTick = 0;
+DWORD         g_namesApplyTick = 0;
+const DWORD   ROSTER_RESEND_MS = 10000;
+const DWORD   NAMES_APPLY_MS   = 2000;
 const DWORD   PERM_NOTICE_MS = 5000;
 
 void onPermToggle(int which) {
@@ -296,6 +307,73 @@ void tickPermissions() {
         g_permRefusalSeen = rs;
         g_permNoticeKind = coop::engine::permRefusalKind();
         g_permNoticeTick = GetTickCount();
+    }
+}
+
+void tickRoster(GameWorld* gw) {
+    std::deque<coop::InboundRoster> got;
+    g_inbound.drainRoster(got);
+    for (std::deque<coop::InboundRoster>::iterator it = got.begin(); it != got.end(); ++it) {
+        if (g_names[it->playerId] != it->name) {
+            g_names[it->playerId] = it->name;
+            g_namesDirty = true;
+            char b[96];
+            _snprintf(b, sizeof(b) - 1, "[names] player %u is '%s'",
+                      (unsigned)it->playerId, it->name.c_str());
+            b[sizeof(b) - 1] = '\0';
+            coopLog(b);
+        }
+    }
+    DWORD now = GetTickCount();
+    if (g_cfg.isHost) {
+        std::string me = coop::steaminvite::selfName();
+        if (!me.empty() && g_names[0] != me) { g_names[0] = me; g_namesDirty = true; }
+        if (g_peerPresent && g_net.isRunning() &&
+            (g_namesDirty || now - g_namesSentTick >= ROSTER_RESEND_MS)) {
+            for (std::map<coop::u32, std::string>::const_iterator it = g_names.begin();
+                 it != g_names.end(); ++it) {
+                if (it->second.empty()) continue;
+                coop::RosterPacket p;
+                memset(&p, 0, sizeof(p));
+                p.type = (coop::u8)coop::PKT_ROSTER;
+                p.playerId = it->first;
+                size_t nl = it->second.size();
+                if (nl > coop::ROSTER_NAME_MAX) nl = coop::ROSTER_NAME_MAX;
+                p.nameLen = (coop::u8)nl;
+                memcpy(p.name, it->second.data(), nl);
+                g_net.queueRoster(p);
+            }
+            g_namesSentTick = now;
+        }
+    }
+    // Apply: tab rank r (distinct squad containers in sorted order - the order
+    // the ownership partition uses) is player r's squad.
+    if (g_names.empty() || !gw || !g_gameStarted || !coop::engine::gameplayLive(gw)) return;
+    if (!g_namesDirty && now - g_namesApplyTick < NAMES_APPLY_MS) return;
+    g_namesApplyTick = now;
+    g_namesDirty = false;
+    coop::EntityState sq[64];
+    unsigned int n = coop::engine::captureSquad(gw, /*leaderOnly*/ false, sq, 64);
+    std::vector<std::pair<std::pair<coop::u32, coop::u32>, unsigned int> > tabs; // container -> first member
+    for (unsigned int i = 0; i < n; ++i) {
+        std::pair<coop::u32, coop::u32> k(sq[i].hContainer, sq[i].hContainerSerial);
+        bool seen = false;
+        for (size_t t = 0; t < tabs.size(); ++t) if (tabs[t].first == k) { seen = true; break; }
+        if (!seen) tabs.push_back(std::make_pair(k, i));
+    }
+    std::sort(tabs.begin(), tabs.end());
+    for (std::map<coop::u32, std::string>::const_iterator it = g_names.begin();
+         it != g_names.end(); ++it) {
+        if (it->second.empty() || it->first >= tabs.size()) continue;
+        const coop::EntityState& e = sq[tabs[it->first].second];
+        unsigned int h[5] = { e.hType, e.hContainer, e.hContainerSerial, e.hIndex, e.hSerial };
+        if (coop::engine::setSquadNameByHand(h, it->second.c_str()) == 1) {
+            char b[96];
+            _snprintf(b, sizeof(b) - 1, "[names] squad tab %u -> '%s'",
+                      (unsigned)it->first, it->second.c_str());
+            b[sizeof(b) - 1] = '\0';
+            coopLog(b);
+        }
     }
 }
 
@@ -422,6 +500,7 @@ void processNetEvents(GameWorld* gw) {
             }
         }
         g_permDirty = true; // host: send the join-permission set now (protocol 56)
+        g_namesDirty = true; // host: and the player names (protocol 57)
         // Coordinated save (protocol 31): while connected under save-sync,
         // the JOIN never writes a save locally - the host's save is
         // authoritative and a local save press forwards as PKT_SAVE_REQ.
@@ -1785,6 +1864,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
 
     KC_PERF(S_NET_EVENTS, processNetEvents(gw));
     KC_PERF(S_NET_EVENTS, tickPermissions());
+    KC_PERF(S_NET_EVENTS, tickRoster(gw));
 
     // Coordinated load (protocol 32): the JOIN never loads locally while a
     // peer is connected under the gate - the host arbitrates; a manual load
@@ -1989,6 +2069,10 @@ void startNetworking() {
         }
     }
 
+    // Our Steam name labels our squad tab on every client (protocol 57); the
+    // friends interface comes with the invite layer (idempotent).
+    if (coop::steamp2p::init()) coop::steaminvite::init(&coopUiConnect);
+    g_net.setLocalName(coop::steaminvite::selfName());
     bool ok;
     if (g_cfg.isHost) {
         coopLog("KenshiCoop: starting as HOST");

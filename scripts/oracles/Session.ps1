@@ -943,3 +943,26 @@ function Test-PermStorage {
     Write-Host "  PERM-STORAGE$(if ($Allow) { '-ALLOW' }) $v - containers=$cont moved=$moved $detail"
     return (Add-GateResult -Name $gateName -Status $v -Metrics @{ containers = $cont; moved = $moved } -Detail $detail)
 }
+
+# drop_peer_refused (protocol 57): the join may drop items from its own tab leader
+# but not from the host's (the owner keeps publishing that bag - a local drop
+# would duplicate the item). The verdict is the join's DPR lines.
+function Test-DropPeerRefused {
+    param([string]$HostFile, [string]$JoinFile)
+    $why = @()
+    $d = Select-String -Path $JoinFile -Pattern 'SCENARIO DPR drop hostBefore=(-?\d+) hostAfter=(-?\d+) ownBefore=(-?\d+) ownAfter=(-?\d+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+    if ($null -eq $d) { $why += "join never attempted the drops" }
+    else {
+        $g = $d.Matches[0].Groups
+        if ([int]$g[1].Value -le 0) { $why += "the host's leader had no probe item to drop" }
+        elseif ($g[1].Value -ne $g[2].Value) { $why += "dropping from the HOST's character went through ($($g[1].Value) -> $($g[2].Value))" }
+        if ([int]$g[3].Value -le 0) { $why += "the join's own leader had no probe item" }
+        elseif ([int]$g[4].Value -ne [int]$g[3].Value - 1) { $why += "dropping from its OWN character did not work ($($g[3].Value) -> $($g[4].Value))" }
+    }
+    $r = Select-String -Path $JoinFile -Pattern 'REFUSED drop from another player' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $r) { $why += "no refusal logged" }
+    $v = if ($why.Count -eq 0) { "PASS" } else { "FAIL" }
+    $detail = $why -join "; "
+    Write-Host "  DROP-PEER-REFUSED $v $detail"
+    return (Add-GateResult -Name "drop_peer_refused" -Status $v -Metrics @{} -Detail $detail)
+}

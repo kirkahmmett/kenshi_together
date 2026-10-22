@@ -78,7 +78,8 @@ enum PacketType {
     PKT_DEED             = 47,// RELIABLE property-ownership row (protocol 54); DeedPacket
     PKT_FIXTURE          = 48,// RELIABLE runtime-fixture identity row (protocol 55); FixturePacket
     PKT_PERMS            = 49,// RELIABLE host's join-permission settings (protocol 56); PermsPacket
-    PKT_PEER_LEFT        = 50 // RELIABLE another player left (host -> joins, protocol 57); PeerLeftPacket
+    PKT_PEER_LEFT        = 50,// RELIABLE another player left (host -> joins, protocol 57); PeerLeftPacket
+    PKT_ROSTER           = 51 // RELIABLE one player's display name (host -> joins, protocol 57); RosterPacket
 };
 
 // One-shot transition events carried on the RELIABLE channel. Continuous state
@@ -1607,6 +1608,19 @@ struct PermsPacket {
 struct PeerLeftPacket {
     u8  type;           // = PKT_PEER_LEFT
     u32 playerId;       // the join that left
+};
+
+// Protocol 57: one player's display name (their Steam persona name), so every
+// client can label each player's squad tab with it instead of "NAMELESS_n". A
+// join sends its own name in HELLO (nameLen + bytes); the host answers with one
+// RosterPacket per player, itself (id 0) included, on every connect and on a
+// slow resend. Host -> joins only. name is NOT NUL-terminated; nameLen counts it.
+const unsigned int ROSTER_NAME_MAX = 32;
+struct RosterPacket {
+    u8   type;          // = PKT_ROSTER
+    u32  playerId;      // 0 = host, else the join's WELCOME id (= its squad tab)
+    u8   nameLen;       // 0..ROSTER_NAME_MAX
+    char name[ROSTER_NAME_MAX];
 };
 
 #pragma pack(pop)

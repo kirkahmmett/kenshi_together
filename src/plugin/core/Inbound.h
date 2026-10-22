@@ -190,6 +190,13 @@ struct InboundPerms {
     PermsPacket pkt;
 };
 
+// One player's display name (protocol 57): from a join's HELLO on the host,
+// from PKT_ROSTER on a join. Session-level, like the permissions.
+struct InboundRoster {
+    u32         playerId;
+    std::string name;
+};
+
 // One received baked-door state row (protocol 26): a door the sender's table
 // saw move; the receiver applies it through the engine's own door actions
 // (baseline updated first - echo-free).
@@ -680,6 +687,11 @@ public:
         InboundPerms ip; ip.pkt = pkt;
         EnterCriticalSection(&cs_); perms_.push_back(ip); LeaveCriticalSection(&cs_);
     }
+    // NET thread: a player's display name (protocol 57).
+    void pushRoster(u32 playerId, const std::string& name) {
+        InboundRoster r; r.playerId = playerId; r.name = name;
+        EnterCriticalSection(&cs_); roster_.push_back(r); LeaveCriticalSection(&cs_);
+    }
     // NET thread: coordinated-load packets (protocol 32), owner-tagged.
     void pushLoadGo(u32 ownerId, const LoadGoPacket& pkt) {
         InboundLoadGo lg; lg.ownerId = ownerId; lg.pkt = pkt;
@@ -842,6 +854,9 @@ public:
     void drainPerms(std::deque<InboundPerms>& out) {
         EnterCriticalSection(&cs_); out.swap(perms_); LeaveCriticalSection(&cs_);
     }
+    void drainRoster(std::deque<InboundRoster>& out) {
+        EnterCriticalSection(&cs_); out.swap(roster_); LeaveCriticalSection(&cs_);
+    }
     void drainLoadReqs(std::deque<InboundLoadReq>& out) {
         EnterCriticalSection(&cs_); out.swap(loadReq_); LeaveCriticalSection(&cs_);
     }
@@ -941,6 +956,7 @@ private:
     // SESSION-PRESERVING: the host's join permissions (protocol 56) are a
     // session setting, not world state - a world swap must not drop them.
     SessionQ<InboundPerms>         perms_;
+    SessionQ<InboundRoster>        roster_;
 
     Inbound(const Inbound&);
     Inbound& operator=(const Inbound&);

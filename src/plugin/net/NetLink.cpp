@@ -253,6 +253,7 @@ void NetLink::queueDeed(const DeedPacket& pkt) { pushLocked(outCs_, outDeed_, pk
 
 void NetLink::queueFixture(const FixturePacket& pkt) { pushLocked(outCs_, outFixture_, pkt); }
 void NetLink::queuePerms(const PermsPacket& pkt) { pushLocked(outCs_, outPerms_, pkt); }
+void NetLink::queueRoster(const RosterPacket& pkt) { pushLocked(outCs_, outRoster_, pkt); }
 
 void NetLink::queueBuildPlace(const BuildPlacePacket& pkt) { pushLocked(outCs_, outBuildPlace_, pkt); }
 
@@ -564,10 +565,16 @@ void NetLink::threadLoop() {
                     } else {
                         linkUp = true; gotWelcome = false;
                         setLastErr("");
-                        // Introduce ourselves with our protocol version.
+                        // Introduce ourselves: protocol version + display name.
+                        unsigned char hb[sizeof(HelloPacket) + ROSTER_NAME_MAX];
                         HelloPacket h;
-                        h.type = (u8)PKT_HELLO; h.version = PROTOCOL_VERSION; h.nameLen = 0;
-                        ENetPacket* out = enet_packet_create(&h, sizeof(h), ENET_PACKET_FLAG_RELIABLE);
+                        size_t nl = localName_.size();
+                        if (nl > ROSTER_NAME_MAX) nl = ROSTER_NAME_MAX;
+                        h.type = (u8)PKT_HELLO; h.version = PROTOCOL_VERSION; h.nameLen = (u8)nl;
+                        std::memcpy(hb, &h, sizeof(h));
+                        if (nl) std::memcpy(hb + sizeof(h), localName_.data(), nl);
+                        ENetPacket* out = enet_packet_create(hb, sizeof(h) + nl,
+                                                             ENET_PACKET_FLAG_RELIABLE);
                         enet_peer_send(ev.peer, CH_RELIABLE, out);
                         netLog("connected to host; sent HELLO");
                     }
@@ -619,7 +626,17 @@ void NetLink::threadLoop() {
                                           (unsigned)id, (unsigned)PROTOCOL_VERSION);
                                 b[sizeof(b) - 1] = '\0';
                                 netLog(b);
-                                if (inbound_) inbound_->pushConnect(id);
+                                if (inbound_) {
+                                    // The name follows the fixed HELLO (protocol 57).
+                                    std::string nm;
+                                    unsigned len = (unsigned)ev.packet->dataLength;
+                                    unsigned nl = h.nameLen;
+                                    if (nl > ROSTER_NAME_MAX) nl = ROSTER_NAME_MAX;
+                                    if (len >= sizeof(HelloPacket) + nl && nl > 0)
+                                        nm.assign((const char*)ev.packet->data + sizeof(HelloPacket), nl);
+                                    if (!nm.empty()) inbound_->pushRoster(id, nm);
+                                    inbound_->pushConnect(id);
+                                }
                             }
                         }
                     } else if (!isHost_ && type == PKT_WELCOME) {
@@ -907,6 +924,16 @@ void NetLink::threadLoop() {
                         if (readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &fxp)
                             && inbound_) {
                             inbound_->pushFixture(fxp.ownerId, fxp);
+                        }
+                    } else if (type == PKT_ROSTER) {
+                        // A player's display name (protocol 57, host -> join).
+                        RosterPacket rp;
+                        if (!isHost_ &&
+                            readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &rp)
+                            && inbound_) {
+                            unsigned nl = rp.nameLen;
+                            if (nl > ROSTER_NAME_MAX) nl = ROSTER_NAME_MAX;
+                            inbound_->pushRoster(rp.playerId, std::string(rp.name, nl));
                         }
                     } else if (type == PKT_PEER_LEFT) {
                         // Another join left (protocol 57, host -> join): drop what
@@ -1605,6 +1632,16 @@ void NetLink::threadLoop() {
 
         // Join-permission sets (protocol 56): host broadcast, CH_RELIABLE.
         {
+            std::vector<RosterPacket> rosterPkts;
+            EnterCriticalSection(&outCs_);
+            rosterPkts.swap(outRoster_);
+            LeaveCriticalSection(&outCs_);
+            for (size_t i = 0; i < rosterPkts.size(); ++i) {
+                ENetPacket* out = enet_packet_create(&rosterPkts[i], sizeof(RosterPacket),
+                                                     ENET_PACKET_FLAG_RELIABLE);
+                if (isHost_) enet_host_broadcast(enetHost_, CH_RELIABLE, out);
+                else         enet_packet_destroy(out); // host -> join only
+            }
             std::vector<PermsPacket> permPkts;
             EnterCriticalSection(&outCs_);
             permPkts.swap(outPerms_);
