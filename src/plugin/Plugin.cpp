@@ -877,6 +877,7 @@ void processNetEvents(GameWorld* gw) {
                   (unsigned)*it, (unsigned)g_net.localId());
         b[sizeof(b) - 1] = '\0';
         coopLog(b);
+        g_repl.playerJoined(*it);
         // Connect-edge resync (protocol 30): re-announce placed buildings and
         // force an immediate resend pass across all change-gated channels, so
         // a late joiner / reconnector converges now instead of waiting out
@@ -950,10 +951,23 @@ void processNetEvents(GameWorld* gw) {
     // (the engine will eventually reap them, and the next drive touches a freed
     // pointer - the "join crash -> host follow-on crash" chain). Despawn the
     // minted proxies and clear the peer maps, mirroring coopUiDisconnect(). Runs
-    // once per leave batch (we support a single peer).
+    // once per leave batch - but only when nobody is left to play with (or
+    // the host went away). With 3-4 players, one leaving must not wipe the
+    // others' replication state or drop their in-flight reliable events: then
+    // only the leaver's own entries go (Replicator::forgetPlayer). Their ground
+    // items stay when the world reloads on the next join (the host's save holds
+    // them once); without load sync they would duplicate, so they go too.
     if (!leaves.empty()) {
-        g_repl.clearPeerReplicationState(gw);
-        g_inbound.flushWorldState();
+        bool hostGone = false;
+        for (std::deque<coop::u32>::iterator it = leaves.begin(); it != leaves.end(); ++it)
+            if (*it == coop::OWNER_ID_ALL) hostGone = true;
+        if (g_peers.empty() || hostGone) {
+            g_repl.clearPeerReplicationState(gw);
+            g_inbound.flushWorldState();
+        } else {
+            for (std::deque<coop::u32>::iterator it = leaves.begin(); it != leaves.end(); ++it)
+                g_repl.forgetPlayer(gw, *it, !g_cfg.loadSync);
+        }
     }
 }
 

@@ -674,6 +674,16 @@ public:
     // session re-censuses and re-mints from scratch.
     void clearPeerReplicationState(GameWorld* gw);
 
+    // One player of several left (3-4 player sessions): forget only what THEY
+    // streamed - their drive entries (death/KO latches kept, as the 30 s prune
+    // does), their clock mapping, and with dropItems their ground-item proxies -
+    // and ignore their entity rows still in flight. Everyone else's state stays,
+    // unlike clearPeerReplicationState(), which is for the last peer leaving.
+    // Their characters stay in the world (away mode guards them).
+    void forgetPlayer(GameWorld* gw, u32 id, bool dropItems);
+    // A player (re)connected under this id: accept their rows again.
+    void playerJoined(u32 id) { goneOwners_.erase(id); }
+
     // AFTER engine: sample + apply the interpolated pose for every tracked entity.
     void applyTargets(GameWorld* gw);
 
@@ -946,7 +956,8 @@ private:
         // accrued under sparse mid coverage - classed to the mid ledger
         // (like young-ring coverage snaps), not steady-state near tracking.
         unsigned long midSeenMs;
-        Driven() : fresh(false), haveActual(false), lx(0), ly(0), lz(0), parked(false),
+        u32          owner;          // player id whose stream fed this entry last
+        Driven() : owner(0), fresh(false), haveActual(false), lx(0), ly(0), lz(0), parked(false),
                    haveDest(false), dx(0), dy(0), dz(0), walkHalted(false), walkStallF(0),
                    suppressed(false), lastSeenMs(0),
                    issuedTask(TASK_NONE), taskApplied(false), taskBad(false),
@@ -1778,6 +1789,7 @@ private:
         PeerClock() : offsetMs(0), have(false), lastCreepMs(0) {}
     };
     std::map<u32, PeerClock> peerClock_;
+    std::set<u32>            goneOwners_; // players who left (forgetPlayer)
 
     // Anim-truth accumulators (the float-bug oracle): of the frames where the
     // body's actual position translated, how many reported a real walk state

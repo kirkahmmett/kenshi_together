@@ -384,12 +384,43 @@ void Replicator::clearPeerReplicationState(GameWorld* gw) {
     resetSession();
 }
 
+void Replicator::forgetPlayer(GameWorld* gw, u32 id, bool dropItems) {
+    goneOwners_.insert(id);
+    peerClock_.erase(id);
+    unsigned int dropped = 0, latched = 0;
+    for (std::map<Key, Driven>::iterator it = targets_.begin(); it != targets_.end(); ) {
+        const Driven& d = it->second;
+        if (d.owner != id) { ++it; continue; }
+        if (d.deathLatched || d.koLatched) { ++latched; ++it; continue; }
+        targets_.erase(it++);
+        ++dropped;
+    }
+    unsigned int wcleared = 0, wstale = 0;
+    if (dropItems) {
+        for (std::map<std::pair<u32, u32>, WorldProxy>::iterator wi = worldProxies_.begin();
+             wi != worldProxies_.end(); ) {
+            if (wi->first.first != id) { ++wi; continue; }
+            RootObject* live = gw ? liveWorldProxy(wi->second) : 0;
+            if (!live) ++wstale;
+            else if (engine::removeWorldItemProxy(gw, live)) ++wcleared;
+            worldProxies_.erase(wi++);
+        }
+    }
+    char b[160];
+    _snprintf(b, sizeof(b) - 1, "[leave] player %u: dropped driven=%u kept latched=%u "
+              "worldProxies cleared=%u stale=%u (others untouched)",
+              (unsigned)id, dropped, latched, wcleared, wstale);
+    b[sizeof(b) - 1] = '\0';
+    coop::logLine(b);
+}
+
 void Replicator::ingest(Inbound& in) {
     std::deque<InboundEntity> got;
     in.drainEntities(got);
     if (got.empty()) return;
     unsigned long now = nowMs();
     for (std::deque<InboundEntity>::iterator it = got.begin(); it != got.end(); ++it) {
+        if (!goneOwners_.empty() && goneOwners_.count(it->ownerId)) continue; // left
         // Wire v35: index the interp ring on the SENDER's capture time mapped
         // into the local clock, not the arrival time - path jitter (Steam
         // relay) otherwise smears straight into the snapshot spacing and the
@@ -416,6 +447,7 @@ void Replicator::ingest(Inbound& in) {
         Driven& d = targets_[keyOf(it->e)];
         d.interp.push(it->e, t, now);
         d.lastSeenMs = now;
+        d.owner = it->ownerId;
     }
 }
 
