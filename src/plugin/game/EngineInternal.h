@@ -571,6 +571,9 @@ extern RelSetFn         g_relSetFn;
 extern RelBoolFn        g_relIsEnemyFn;
 extern RelBoolFn        g_relIsAllyFn;
 extern std::vector<FactionDeltaRec> g_facDeltas;
+struct CoopCs;
+extern CoopCs g_facCs; // guards g_facDeltas (see EngineInternal.cpp)
+void lockFacDeltas(bool on);
 extern AffectRelEvFn  g_affectEvOrig;
 extern AffectRelAmtFn g_affectAmtOrig;
 extern FacLogGate g_facLogGates[16];

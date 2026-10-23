@@ -2230,6 +2230,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     ++g_tick;
     g_lastGw = gw; // cache for the argument-less F2 UI callbacks
     coop::engine::noteMainThread();
+    coop::engine::probeThread(46, "mainLoop_hook");
 
 #ifdef KENSHICOOP_HARNESS
     // TEST-ONLY (KENSHICOOP_TEST_CRASH=<seconds>): fault on purpose, to prove the
@@ -3106,6 +3107,15 @@ __declspec(dllexport) void startPlugin() {
     // timestamp in this run (and every time-sync packet) shares the skewed clock.
     coop::logSetFakeSkewMs(g_cfg.fakeClockSkewMs);
     coop::logInit(g_cfg.logPath.c_str(), g_cfg.isHost ? "HOST" : "JOIN");
+    // The thread guards must hold from the first world load on, not from the
+    // first main-loop tick (a join's first load runs before that).
+    coop::engine::noteMainThread();
+    {
+        char b[64];
+        _snprintf(b, sizeof(b) - 1, "[thread] startPlugin on thread %lu", (unsigned long)GetCurrentThreadId());
+        b[sizeof(b) - 1] = '\0';
+        coopLog(b);
+    }
 
     // Fault-time crash dumps, installed before anything else can fault. RE_Kenshi's
     // own dump is written from a late filter and carries no usable frames, which is

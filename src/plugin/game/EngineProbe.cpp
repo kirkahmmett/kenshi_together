@@ -96,6 +96,7 @@ bool mkspyIsWeapon(Item* it) {
 Item* __fastcall mk6_hook(RootObjectFactory* self, GameData* gd, const hand* handle,
                           GameData* weaponMesh, GameData* matData, int levelOverride,
                           Faction* flagUniform) {
+    probeThread(15, "mk6_hook");
     void* caller = _ReturnAddress();
     const int gdt = mkspyType(gd);
     const bool isWpn = (gdt == (int)WEAPON);
@@ -142,6 +143,7 @@ Item* __fastcall mk6_hook(RootObjectFactory* self, GameData* gd, const hand* han
 }
 
 Item* __fastcall mkS_hook(RootObjectFactory* self, GameData* itemState) {
+    probeThread(16, "mkS_hook");
     void* caller = _ReturnAddress();
     Item* it = g_mkSOrig(self, itemState);
     __try {
@@ -158,6 +160,7 @@ Item* __fastcall mkS_hook(RootObjectFactory* self, GameData* itemState) {
 }
 
 Item* __fastcall cpy_hook(RootObjectFactory* self, Item* from) {
+    probeThread(17, "cpy_hook");
     void* caller = _ReturnAddress();
     Item* it = g_cpyOrig(self, from);
     __try {
@@ -177,6 +180,7 @@ Item* __fastcall cpy_hook(RootObjectFactory* self, Item* from) {
 GameData* __fastcall cdl_hook(RootObjectFactory* self, GameData* dataList,
                               const std::string* listName, itemType materialDataType,
                               int useVal012) {
+    probeThread(18, "cdl_hook");
     GameData* r = g_cdlOrig(self, dataList, listName, materialDataType, useVal012);
     if (g_inWeaponMk > 0 && g_cdlLogged < MK6_LOG_CAP) {
         ++g_cdlLogged;
@@ -198,6 +202,7 @@ GameData* __fastcall cdl_hook(RootObjectFactory* self, GameData* dataList,
 
 Sword* __fastcall swordCtor_hook(Sword* self, GameData* baseData, GameData* companyData,
                                  GameData* materialData, hand* handle, int level) {
+    probeThread(19, "swordCtor_hook");
     void* caller = _ReturnAddress();
     Sword* r = g_swordOrig(self, baseData, companyData, materialData, handle, level);
     __try {

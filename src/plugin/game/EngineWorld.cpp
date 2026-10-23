@@ -378,6 +378,7 @@ bool installFactionHooks() {
 
 unsigned int drainFactionDeltas(FactionDelta* out, unsigned int maxOut) {
     unsigned int n = 0;
+    lockFacDeltas(true); // the detours may append from Kenshi's worker thread
     for (unsigned int i = 0; i < g_facDeltas.size() && n < maxOut; ++i, ++n) {
         const FactionDeltaRec& r = g_facDeltas[i];
         memcpy(out[n].meSid,   r.meSid,   sizeof(out[n].meSid));
@@ -386,6 +387,7 @@ unsigned int drainFactionDeltas(FactionDelta* out, unsigned int maxOut) {
         out[n].amount = r.amount; out[n].mult = r.mult; out[n].after = r.after;
     }
     g_facDeltas.clear();
+    lockFacDeltas(false);
     return n;
 }
 

@@ -101,6 +101,7 @@ PreSaveFn g_preSave = 0; // setPreSaveCallback: rolling backups before the write
 
 void __fastcall saveMgrSave_hook(SaveManager* self, const std::string* name,
                                  bool autosave) {
+    probeThread(0, "saveMgrSave_hook");
     char nm[48];
     nm[0] = '\0';
     __try {
@@ -191,6 +192,7 @@ static bool loadDetourEdge(const char* nm, const char* via) {
 }
 
 void __fastcall saveMgrLoad_hook(SaveManager* self, const std::string* name) {
+    probeThread(1, "saveMgrLoad_hook");
     if (g_inLoadDetour) { g_loadHookOrig(self, name); return; }
     char nm[48];
     nm[0] = '\0';
@@ -211,6 +213,7 @@ void __fastcall saveMgrLoad_hook(SaveManager* self, const std::string* name) {
 // The in-game load menu's entry: load(SaveInfo&, resetPos).
 void __fastcall saveMgrLoadInfo_hook(SaveManager* self, const SaveInfo* info,
                                      bool resetPos) {
+    probeThread(2, "saveMgrLoadInfo_hook");
     if (g_inLoadDetour) { g_loadInfoHookOrig(self, info, resetPos); return; }
     char nm[48];
     nm[0] = '\0';
@@ -582,6 +585,7 @@ void snapshotVoteButtons() {
 }
 
 void __fastcall setGameSpeed_hook(GameWorld* self, float speed, bool click) {
+    probeThread(3, "setGameSpeed_hook");
     if (speedDbgOn()) speedDbgLog("setGameSpeed", speed, click ? 1 : 0);
     if (!g_speedGuardWrite && speed > 0.0f) {
         g_speedIntentMult  = speed;
@@ -594,6 +598,7 @@ void __fastcall setGameSpeed_hook(GameWorld* self, float speed, bool click) {
 }
 
 void __fastcall userPause_hook(GameWorld* self, bool p) {
+    probeThread(4, "userPause_hook");
     if (speedDbgOn()) speedDbgLog("userPause", 0.0f, p ? 1 : 0);
     if (!g_speedGuardWrite && (!g_mpPauseRules || pauseKeyRecent())) {
         g_speedIntentPaused = p;
@@ -604,6 +609,7 @@ void __fastcall userPause_hook(GameWorld* self, bool p) {
 }
 
 void __fastcall togglePause_hook(GameWorld* self, bool p) {
+    probeThread(5, "togglePause_hook");
     if (speedDbgOn()) speedDbgLog("togglePause", 0.0f, p ? 1 : 0);
     if (!g_speedGuardWrite && (!g_mpPauseRules || pauseKeyRecent())) {
         g_speedIntentPaused = p;
@@ -846,6 +852,23 @@ static bool offMainThread() {
 }
 unsigned long offMainInventoryCalls() { return g_offMainCalls; }
 
+// Load-crash investigation (2026-10-23): which engine detours does Kenshi call
+// from a thread other than the main one? Each logs once, the first time.
+static volatile LONG g_offMainHook[48];
+void probeThread(int idx, const char* name) {
+    if (!g_mainThreadId || GetCurrentThreadId() == g_mainThreadId) return;
+    if (idx < 0 || idx >= 48) return;
+    if (InterlockedIncrement(&g_offMainHook[idx]) != 1) return;
+    char b[128];
+    _snprintf(b, sizeof(b) - 1, "[thread] %s called off the main thread (thread %lu)",
+              name, (unsigned long)GetCurrentThreadId());
+    b[sizeof(b) - 1] = '\0';
+    coop::logLine(b);
+}
+unsigned long offMainHookCalls(int idx) {
+    return (idx >= 0 && idx < 48) ? (unsigned long)g_offMainHook[idx] : 0;
+}
+
 Item* __fastcall removeDontDestroy_hook(Inventory* self, Item* it, int howmany,
                                         bool returnCopyIfSomeLeft) {
     Item* r = g_removeDontDestroyOrig(self, it, howmany, returnCopyIfSomeLeft);
@@ -1069,6 +1092,7 @@ RecruitFn g_recruitHookOrig = 0;
 // character into the host's tab (measured 2026-10-22).
 static bool g_recruitEdgeSuppress = false;
 bool __fastcall recruit_hook(PlayerInterface* self, Character* c, bool editor) {
+    probeThread(6, "recruit_hook");
     unsigned int hb[5] = { 0, 0, 0, 0, 0 };
     bool haveBefore = false;
     __try {
@@ -1197,6 +1221,7 @@ Building* __fastcall createBuilding_hook(
     Layout* furnitureOf, Building* isDoorOf, GameSaveState* saveState,
     Building* isIndoorsOf, bool invisible, bool completed, bool isFoliage,
     int floorNumber, bool isOutsideFurniture) {
+    probeThread(7, "createBuilding_hook");
     ++g_buildCaptureDepth;
     Building* b = g_createBldgOrig(self, data, position, t, owner, rotation, cb,
                                    furnitureOf, isDoorOf, saveState, isIndoorsOf,
@@ -1228,6 +1253,7 @@ Building* __fastcall createBuilding_hook(
 typedef void (__fastcall* PlaceFinalFn)(PreviewBuilding* self);
 PlaceFinalFn g_placeFinalOrig = 0;
 void __fastcall placeFinal_hook(PreviewBuilding* self) {
+    probeThread(8, "placeFinal_hook");
     // Host setting (protocol 56): the build-mode commit is the player placing a
     // new building; a join the host forbade from building simply does not place.
     if (!g_permBuild) { notePermRefusal(1, "placing buildings"); return; }
@@ -1256,6 +1282,7 @@ static void pushRemoveEdge(const unsigned int h[5]) {
     for (int i = 0; i < 5; ++i) g_removeEdges.push_back(h[i]);
 }
 void __fastcall dismantle_hook(Building* self) {
+    probeThread(9, "dismantle_hook");
     unsigned int h[5] = { 0, 0, 0, 0, 0 };
     bool haveHand = false;
     __try {
@@ -1290,6 +1317,7 @@ std::set<Character*>  g_aiSuspended;
 // The detour never dereferences 'self' (it is only compared as a key), so a
 // stale/odd pointer cannot fault here; no SEH frame needed.
 void __fastcall periodicUpdate_hook(Character* self) {
+    probeThread(10, "periodicUpdate_hook");
     if (!g_aiSuspended.empty() &&
         g_aiSuspended.find(self) != g_aiSuspended.end()) {
         return; // decision layer suspended: host drives the task, AI stays quiet
@@ -1315,6 +1343,7 @@ bool               g_taskSelectSpike  = false;
 unsigned long      g_taskSelectFires  = 0; // total detour fires (reachability proof)
 
 bool __fastcall setCurrentAction_hook(CharBody* self, Tasker* t) {
+    probeThread(11, "setCurrentAction_hook");
     if (g_taskSelectSpike && self && t) {
         __try {
             ++g_taskSelectFires;
@@ -1359,6 +1388,25 @@ typedef HitMaterialType (__fastcall* HitByMeleeFn)(
     Character* self, CutDirection dir, Damages& damage, Character* who,
     CombatTechniqueData* attack, int comboID);
 HitByMeleeFn          g_hitByMeleeOrig = 0;
+// Kenshi runs melee hits and faction-relation changes on a WORKER thread as well
+// as the main one (thread probe, 2026-10-23), so hitByMelee_hook and the
+// affectRelations detours race the main thread's edits of these containers -
+// a std::set/map/vector changed from two threads at once corrupts the heap (the
+// load-time crashes in Ogre/MSVCP100 and the 0xc0000374 seen in tests). Every
+// touch of the guard sets, the reported-damage map and the faction delta queue
+// goes through these locks. Created at DLL load, before any detour can run.
+struct CoopCs {
+    CRITICAL_SECTION cs;
+    CoopCs()  { InitializeCriticalSection(&cs); }
+    ~CoopCs() { DeleteCriticalSection(&cs); }
+};
+static CoopCs g_combatCs; // g_damageGuarded, g_reportAttackers, g_reportedDmg
+CoopCs        g_facCs;    // g_facDeltas, g_facLogGates
+struct CsHold {
+    CRITICAL_SECTION* c;
+    explicit CsHold(CoopCs& l) : c(&l.cs) { EnterCriticalSection(c); }
+    ~CsHold() { LeaveCriticalSection(c); }
+};
 std::set<Character*>  g_damageGuarded;
 unsigned long         g_dmgGuardedHits = 0; // swings intercepted (conformance signal)
 unsigned long         g_dmgPassedHits  = 0; // swings passed through to the engine
@@ -1375,22 +1423,26 @@ bool                              g_combatReport = false;
 HitMaterialType __fastcall hitByMelee_hook(Character* self, CutDirection dir,
                                            Damages& damage, Character* who,
                                            CombatTechniqueData* attack, int comboID) {
-    if (!g_damageGuarded.empty() &&
-        g_damageGuarded.find(self) != g_damageGuarded.end()) {
-        ++g_dmgGuardedHits;
-        // Report path (join): the local swing never lands here, but if a player-
-        // squad attacker dealt it, accumulate so the host wounds the real NPC.
-        // flesh ~ solid impact (cut+blunt+pierce+stun); blood ~ bleeding sources
-        // (cut+pierce, plus the bleed multiplier). Absolute deltas, host-applied.
-        if (g_combatReport && !g_reportAttackers.empty() && who &&
-            g_reportAttackers.find(who) != g_reportAttackers.end()) {
-            ReportedDmg& rd = g_reportedDmg[self];
-            rd.flesh += damage.cut + damage.blunt + damage.pierce + damage.extraStun;
-            rd.blood += (damage.cut + damage.pierce) * 0.5f + damage.bleedMult;
+    probeThread(12, "hitByMelee_hook");
+    {
+        CsHold lock(g_combatCs); // may run on Kenshi's worker thread
+        if (!g_damageGuarded.empty() &&
+            g_damageGuarded.find(self) != g_damageGuarded.end()) {
+            ++g_dmgGuardedHits;
+            // Report path (join): the local swing never lands here, but if a player-
+            // squad attacker dealt it, accumulate so the host wounds the real NPC.
+            // flesh ~ solid impact (cut+blunt+pierce+stun); blood ~ bleeding sources
+            // (cut+pierce, plus the bleed multiplier). Absolute deltas, host-applied.
+            if (g_combatReport && !g_reportAttackers.empty() && who &&
+                g_reportAttackers.find(who) != g_reportAttackers.end()) {
+                ReportedDmg& rd = g_reportedDmg[self];
+                rd.flesh += damage.cut + damage.blunt + damage.pierce + damage.extraStun;
+                rd.blood += (damage.cut + damage.pierce) * 0.5f + damage.bleedMult;
+            }
+            return HIT_MISSED; // cosmetic fight: the local swing never lands
         }
-        return HIT_MISSED; // cosmetic fight: the local swing never lands
+        ++g_dmgPassedHits;
     }
-    ++g_dmgPassedHits;
     return g_hitByMeleeOrig(self, dir, damage, who, attack, comboID);
 }
 
@@ -1520,6 +1572,10 @@ AffectRelAmtFn g_affectAmtOrig = 0;
 // carried into the next emitted line. POD-only (SEH legal), oldest-slot reuse.
 FacLogGate g_facLogGates[16];
 
+void lockFacDeltas(bool on) {
+    if (on) EnterCriticalSection(&g_facCs.cs); else LeaveCriticalSection(&g_facCs.cs);
+}
+
 void recordFactionDelta(FactionRelations* self, Faction* p, int isEvent,
                         int ev, float amount, float mult) {
     __try {
@@ -1569,12 +1625,16 @@ void recordFactionDelta(FactionRelations* self, Faction* p, int isEvent,
 }
 
 void __fastcall affectRelEv_hook(FactionRelations* self, Faction* p, int e, float mult) {
+    probeThread(13, "affectRelEv_hook");
     g_affectEvOrig(self, p, e, mult);
+    CsHold lock(g_facCs); // may run on Kenshi's worker thread
     recordFactionDelta(self, p, 1, e, 0.0f, mult);
 }
 
 void __fastcall affectRelAmt_hook(FactionRelations* self, Faction* p, float amount, float mult) {
+    probeThread(14, "affectRelAmt_hook");
     g_affectAmtOrig(self, p, amount, mult);
+    CsHold lock(g_facCs);
     recordFactionDelta(self, p, 0, 0, amount, mult);
 }
 
@@ -2655,21 +2715,23 @@ int probeMoveSquadMember(GameWorld* gw, const unsigned int mHand[5],
     }
 }
 
-void clearDamageGuard()           { g_damageGuarded.clear(); }
-void addDamageGuard(Character* c) { if (c) g_damageGuarded.insert(c); }
-unsigned int damageGuardCount()   { return (unsigned int)g_damageGuarded.size(); }
+void clearDamageGuard()           { CsHold l(g_combatCs); g_damageGuarded.clear(); }
+void addDamageGuard(Character* c) { if (c) { CsHold l(g_combatCs); g_damageGuarded.insert(c); } }
+unsigned int damageGuardCount()   { CsHold l(g_combatCs); return (unsigned int)g_damageGuarded.size(); }
 void damageGuardStats(unsigned long* outGuarded, unsigned long* outPassed) {
     if (outGuarded) *outGuarded = g_dmgGuardedHits;
     if (outPassed)  *outPassed  = g_dmgPassedHits;
 }
 
 void setCombatReport(bool on) {
+    CsHold l(g_combatCs);
     g_combatReport = on;
     if (!on) g_reportedDmg.clear();
 }
-void clearReportAttackers()          { g_reportAttackers.clear(); }
-void addReportAttacker(Character* c)  { if (c) g_reportAttackers.insert(c); }
+void clearReportAttackers()          { CsHold l(g_combatCs); g_reportAttackers.clear(); }
+void addReportAttacker(Character* c)  { if (c) { CsHold l(g_combatCs); g_reportAttackers.insert(c); } }
 bool takeReportedDamage(Character* c, float* outFlesh, float* outBlood) {
+    CsHold l(g_combatCs);
     std::map<Character*, ReportedDmg>::iterator it = g_reportedDmg.find(c);
     if (it == g_reportedDmg.end()) return false;
     if (outFlesh) *outFlesh = it->second.flesh;

@@ -776,6 +776,8 @@ void setTakeFromPlayers(bool allowed);
 // Record the game's main thread (call from the main loop). The inventory
 // detours pass calls from any other thread straight to the engine.
 void noteMainThread();
+// Logs once per detour (idx) the first time it runs off the main thread.
+void probeThread(int idx, const char* name);
 unsigned long offMainInventoryCalls();
 unsigned int permRefusalSeq();
 int          permRefusalKind();
