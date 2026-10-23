@@ -406,6 +406,17 @@ void onHostSetBtn(DataPanelLine*) {
     g_panel.hostSettings = !g_panel.hostSettings;
     g_panel.needsRebuild = true;
 }
+void (*g_newGameCycleFn)(int) = 0;
+DataPanelLine* g_newGameBtns[2] = { 0, 0 };
+void onNewGameBtn(DataPanelLine* line) {
+    for (int i = 0; i < 2; ++i) {
+        if (g_newGameBtns[i] && (DataPanelLine*)g_newGameBtns[i] == line) {
+            if (g_newGameCycleFn) g_newGameCycleFn(i);
+            g_panel.needsRebuild = true;
+            return;
+        }
+    }
+}
 void onAutoHostBtn(DataPanelLine*) {
     if (g_autoHostToggleFn) g_autoHostToggleFn();
     g_panel.needsRebuild = true;
@@ -609,6 +620,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
     g_onConnectFn = onConnect;
     g_onDisconnectFn = onDisconnect;
     g_autoHostToggleFn = st->onAutoHostToggle;
+    g_newGameCycleFn = st->onNewGameCycle;
     g_pauseToggleFn = st->onPauseToggle;
     ForgottenGUI* g = ::gui; // KenshiLib data export (spike 46)
     { static void* s_last = (void*)-1;
@@ -835,6 +847,10 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                                (g_panel.hostSettings ? "S" : "s");
         sig += st->autoHost ? "A" : "a";
         sig += st->gamePaused ? "Z" : "z";
+        if (st->onNewGameCycle) {
+            sig += "|m"; sig += st->newGameMoney ? st->newGameMoney : "";
+            sig += "|s"; sig += st->newGameStats ? st->newGameStats : "";
+        }
         if (g_panel.needsRebuild || !g_panel.built || sig != g_lastSimpleSig) {
             char titleBuf[64];
             _snprintf(titleBuf, sizeof(titleBuf) - 1, "Kenshi Together    -    F%d to close",
@@ -854,6 +870,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             for (int i = 0; i < INVITE_ROWS_MAX; ++i) { g_friendBtns[i] = 0; g_friendBtnIds[i] = 0; }
             for (int i = 0; i < 4; ++i) g_permBtns[i] = 0;
             g_inviteBtn = 0; g_hostSetBtn = 0; g_autoHostBtn = 0; g_pauseBtn = 0;
+            g_newGameBtns[0] = 0; g_newGameBtns[1] = 0;
 #define ROW(k, kk, vv, o) do { if (n < SIMPLE_ROWS_MAX) { keys[n] = (kk); vals[n] = (vv); \
             rows[n].kind = (k); rows[n].key = &keys[n]; rows[n].val = &vals[n]; \
             rows[n].out = (DataPanelLine**)(o); ++n; } } while (0)
@@ -878,6 +895,17 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                     ROW(1, k, std::string("Join  ") + g_inviteApi->gameName(i) + "'s game", &g_gameBtns[i]);
                 }
                 ROW(1, "refresh", "Refresh list", &g_refreshBtn);
+                if (st->onNewGameCycle) {
+                    ROW(2, "", "", 0);
+                    ROW(0, "New game", "New game settings (host, applied when you start a new game):",
+                        &infoLines[infoN++]);
+                    ROW(1, "ngmoney", std::string("    Starting money: ") +
+                                      (st->newGameMoney ? st->newGameMoney : "?") + "    (change)",
+                        &g_newGameBtns[0]);
+                    ROW(1, "ngstats", std::string("    Starting stats: ") +
+                                      (st->newGameStats ? st->newGameStats : "?") + "    (change)",
+                        &g_newGameBtns[1]);
+                }
                 ROW(2, "", "", 0);
                 ROW(0, "Status", "Status: " + statusVal, &statusLine);
                 ROW(2, "", "", 0);
@@ -938,6 +966,8 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             if (g_hostSetBtn) g_hostSetBtn->callback = MyGUI::newDelegate(&onHostSetBtn);
             if (g_pauseBtn)   g_pauseBtn->callback   = MyGUI::newDelegate(&onPauseBtn);
             if (g_autoHostBtn) g_autoHostBtn->callback = MyGUI::newDelegate(&onAutoHostBtn);
+            for (int i = 0; i < 2; ++i)
+                if (g_newGameBtns[i]) g_newGameBtns[i]->callback = MyGUI::newDelegate(&onNewGameBtn);
             for (int i = 0; i < GAME_ROWS_MAX; ++i)
                 if (g_gameBtns[i]) g_gameBtns[i]->callback = MyGUI::newDelegate(&onGameBtn);
             for (int i = 0; i < INVITE_ROWS_MAX; ++i)

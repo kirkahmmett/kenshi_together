@@ -155,7 +155,7 @@ const float COMBAT_SLIDE_MAX     = 60.0f;  // cap on the fast catch-up walk spee
                                            // gap glides quickly without a teleport
 const float COMBAT_SNAP_VEL      = 8.0f;   // source speed (u/s) below which a big drift is churn
                                            // / wrong-place, not a chase - converge, never warp
-const unsigned long COMBAT_CONVERGE_MS = 400; // drift must persist over the snap band this long
+const unsigned long COMBAT_CONVERGE_MS = 2000; // drift must persist over the snap band this long
                                               // (on a moving source) before an instant teleport
 const unsigned long COMBAT_REISSUE_MS     = 1500; // base re-issue throttle
 const unsigned long COMBAT_REISSUE_MAX_MS = 6000; // backoff cap

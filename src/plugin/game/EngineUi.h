@@ -88,6 +88,12 @@ struct CoopPanelState {
     // Host: game paused for everyone, and the button that toggles it.
     bool               gamePaused;
     void               (*onPauseToggle)();
+    // New game settings (lobby view): what a NEW game starts with, as display
+    // text ("Start default", "50,000 cats"); a press calls onNewGameCycle
+    // (0 money, 1 stats) to step to the next preset. Null callback = rows hidden.
+    const char*        newGameMoney;
+    const char*        newGameStats;
+    void               (*onNewGameCycle)(int which);
 };
 // The panel's role/transport selections at the moment Connect is hit. peerId is the
 // Steam ID pasted in-panel this session (0 if none), and overrides the config

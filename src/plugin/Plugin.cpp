@@ -270,22 +270,55 @@ const DWORD   ROSTER_RESEND_MS = 10000;
 bool          g_autoHost = false;
 bool          g_autoHostDone = false; // already hosted (or tried) for this load
 bool          g_prefsLoaded = false;
+bool          g_firstWorldLoaded = true; // set at the first gameplay start
 const char*   PREFS_FILE = "KenshiCoop_prefs.txt";
+// New game settings (lobby panel): what a NEW game starts with. Index 0 keeps
+// whatever the chosen start gives (e.g. Multiplayer+ = 500,000 cats, stats 50).
+// Applied once, at the first gameplay start of a game that was NOT loaded from a
+// save, on the host (or solo) side - a join receives the host's world as is.
+const int   NG_MONEY[]      = { -1, 0, 1000, 10000, 50000, 100000, 500000 };
+const char* NG_MONEY_TEXT[] = { "Start default", "0 cats", "1,000 cats", "10,000 cats",
+                                "50,000 cats", "100,000 cats", "500,000 cats" };
+const int   NG_STATS[]      = { -1, 10, 25, 50, 75, 100 };
+const char* NG_STATS_TEXT[] = { "Start default", "10 in every stat", "25 in every stat",
+                                "50 in every stat", "75 in every stat", "100 in every stat" };
+const int   NG_MONEY_N = sizeof(NG_MONEY) / sizeof(NG_MONEY[0]);
+const int   NG_STATS_N = sizeof(NG_STATS) / sizeof(NG_STATS[0]);
+int         g_ngMoney = 0;
+int         g_ngStats = 0;
+
 void loadPrefs() {
     if (g_prefsLoaded) return;
     g_prefsLoaded = true;
     FILE* f = fopen(PREFS_FILE, "r");
     if (!f) return;
     char line[128];
-    while (fgets(line, sizeof(line), f))
+    while (fgets(line, sizeof(line), f)) {
+        int v = 0;
         if (strncmp(line, "autoHost=1", 10) == 0) g_autoHost = true;
+        else if (sscanf(line, "newGameMoney=%d", &v) == 1 && v >= 0 && v < NG_MONEY_N) g_ngMoney = v;
+        else if (sscanf(line, "newGameStats=%d", &v) == 1 && v >= 0 && v < NG_STATS_N) g_ngStats = v;
+    }
     fclose(f);
 }
 void savePrefs() {
     FILE* f = fopen(PREFS_FILE, "w");
     if (!f) return;
     fprintf(f, "autoHost=%d\n", g_autoHost ? 1 : 0);
+    fprintf(f, "newGameMoney=%d\n", g_ngMoney);
+    fprintf(f, "newGameStats=%d\n", g_ngStats);
     fclose(f);
+}
+void onNewGameCycle(int which) {
+    loadPrefs();
+    if (which == 0) g_ngMoney = (g_ngMoney + 1) % NG_MONEY_N;
+    else            g_ngStats = (g_ngStats + 1) % NG_STATS_N;
+    savePrefs();
+    char b[96];
+    _snprintf(b, sizeof(b) - 1, "[coop-ui] new game: money=%s stats=%s",
+              NG_MONEY_TEXT[g_ngMoney], NG_STATS_TEXT[g_ngStats]);
+    b[sizeof(b) - 1] = '\0';
+    coopLog(b);
 }
 void onAutoHostToggle() {
     g_autoHost = !g_autoHost;
@@ -1521,6 +1554,10 @@ void coopPanelDrive() {
     loadPrefs();
     ps.autoHost = g_autoHost;
     ps.onAutoHostToggle = &onAutoHostToggle;
+    loadPrefs();
+    ps.newGameMoney = NG_MONEY_TEXT[g_ngMoney];
+    ps.newGameStats = NG_STATS_TEXT[g_ngStats];
+    ps.onNewGameCycle = &onNewGameCycle;
     // Only the host pauses, and only on purpose (Space / panel button);
     // trade and dialogue windows no longer stop the game for everyone.
     coop::engine::setMultiplayerPauseRules(g_net.isRunning());
@@ -2271,6 +2308,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
         {
             coop::engine::LoadEdge stale[8];
             unsigned int n = coop::engine::drainLoadEdges(stale, 8);
+            g_firstWorldLoaded = n > 0; // no load edge = the player started a NEW game
             if (n > 0) {
                 char b[112];
                 _snprintf(b, sizeof(b) - 1,
@@ -2296,7 +2334,10 @@ void mainLoop_hook(GameWorld* gw, float dt) {
         // the owner-authoritative stats channel (protocol 17). Solo at gameplay
         // start the write is purely local, and the join receives it as part of the
         // host's world through the connect-push below.
-        if (!g_peerPresent &&
+        //
+        // The lobby's "Starting stats" setting, when set, replaces the 50.
+        bool ngStatsSet = !g_firstWorldLoaded && g_ngStats > 0;
+        if (!g_peerPresent && !ngStatsSet &&
             coop::engine::playerSquadHasTemplate(gw, WPX2_MARKER_SID)) {
             unsigned int nb = coop::engine::buffAllPlayerStats(gw, WPX2_STAT_LEVEL);
             char b[128];
@@ -2304,6 +2345,30 @@ void mainLoop_hook(GameWorld* gw, float dt) {
                       "[start] Multiplayer+ (Wanderer x2): raised %u PC(s) to %d in every stat",
                       nb, (int)WPX2_STAT_LEVEL);
             b[sizeof(b) - 1] = '\0'; coopLog(b);
+        }
+        // New game settings (lobby panel): only a world that did not come from a
+        // save, and only where it is ours to write (no peer yet: a join gets the
+        // host's world, and the host's world reaches the join on connect).
+        if (!g_firstWorldLoaded && !g_peerPresent) {
+            loadPrefs();
+            char b[160];
+            _snprintf(b, sizeof(b) - 1, "[start] new game: money=%s stats=%s",
+                      NG_MONEY_TEXT[g_ngMoney], NG_STATS_TEXT[g_ngStats]);
+            b[sizeof(b) - 1] = '\0'; coopLog(b);
+            if (g_ngMoney > 0) {
+                bool ok = coop::engine::writePlayerWallet(gw, NG_MONEY[g_ngMoney]);
+                _snprintf(b, sizeof(b) - 1, "[start] wallet set to %d cats (%s)",
+                          NG_MONEY[g_ngMoney], ok ? "ok" : "FAILED");
+                b[sizeof(b) - 1] = '\0'; coopLog(b);
+            }
+            if (g_ngStats > 0) {
+                // Raise-only (a floor): a new game's characters start below every
+                // preset, and the Multiplayer+ 50 is skipped above when this is set.
+                unsigned int nb = coop::engine::buffAllPlayerStats(gw, (float)NG_STATS[g_ngStats]);
+                _snprintf(b, sizeof(b) - 1, "[start] raised %u PC(s) to %d in every stat",
+                          nb, NG_STATS[g_ngStats]);
+                b[sizeof(b) - 1] = '\0'; coopLog(b);
+            }
         }
         // Push-save-on-connect ordering: if a peer connected while we were still
         // at the menu / loading, its connect edge could not bake a save (no live
