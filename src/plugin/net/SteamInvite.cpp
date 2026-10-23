@@ -293,7 +293,7 @@ void onLobbyCreated(LobbyCreated_t* r, bool ioFailure) {
         _snprintf(cs, sizeof(cs) - 1, "+connect_lobby %llu", g_lobby);
         cs[sizeof(cs) - 1] = '\0';
         g_frSetRp(g_friends, "connect", cs);
-        g_frSetRp(g_friends, "status", "Hosting KenshiCoop");
+        g_frSetRp(g_friends, "status", "Hosting Kenshi Together");
     }
     char b[96];
     _snprintf(b, sizeof(b) - 1, "lobby created %llu (protocol %s)", g_lobby, pv);

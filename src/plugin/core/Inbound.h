@@ -352,6 +352,20 @@ struct InboundLoadNack {
     LoadNackPacket pkt;
 };
 
+// Mod list check (v59): playerId's enabled mod list differs from ours (on a
+// join, playerId 0 = the host). theirCount/ourCount are the mod counts.
+struct InboundModCheck {
+    u32 playerId;
+    u16 theirCount;
+    u16 ourCount;
+};
+
+// A join finished loading (protocol 59, join -> host).
+struct InboundLoadReady {
+    u32             ownerId;
+    LoadReadyPacket pkt;
+};
+
 // One received camera hint (protocol 43, host side): the join's camera world
 // center, folded into interestCenters as an extra anchor. Latest wins.
 struct InboundCamHint {
@@ -705,6 +719,17 @@ public:
         InboundLoadNack ln; ln.ownerId = ownerId; ln.pkt = pkt;
         EnterCriticalSection(&cs_); loadNack_.push_back(ln); LeaveCriticalSection(&cs_);
     }
+    void pushModMismatch(u32 playerId, u16 theirs, u16 ours) {
+        InboundModCheck m; m.playerId = playerId; m.theirCount = theirs; m.ourCount = ours;
+        EnterCriticalSection(&cs_); modCheck_.push_back(m); LeaveCriticalSection(&cs_);
+    }
+    void drainModMismatches(std::deque<InboundModCheck>& out) {
+        EnterCriticalSection(&cs_); out.swap(modCheck_); LeaveCriticalSection(&cs_);
+    }
+    void pushLoadReady(u32 ownerId, const LoadReadyPacket& pkt) {
+        InboundLoadReady lr; lr.ownerId = ownerId; lr.pkt = pkt;
+        EnterCriticalSection(&cs_); loadReady_.push_back(lr); LeaveCriticalSection(&cs_);
+    }
     // NET thread: one received camera hint (protocol 43), owner-tagged.
     void pushCamHint(u32 ownerId, const CamHintPacket& pkt) {
         InboundCamHint ch; ch.ownerId = ownerId; ch.pkt = pkt;
@@ -863,6 +888,9 @@ public:
     void drainLoadNacks(std::deque<InboundLoadNack>& out) {
         EnterCriticalSection(&cs_); out.swap(loadNack_); LeaveCriticalSection(&cs_);
     }
+    void drainLoadReadys(std::deque<InboundLoadReady>& out) {
+        EnterCriticalSection(&cs_); out.swap(loadReady_); LeaveCriticalSection(&cs_);
+    }
     void drainCamHints(std::deque<InboundCamHint>& out) {
         EnterCriticalSection(&cs_); out.swap(camHint_); LeaveCriticalSection(&cs_);
     }
@@ -953,6 +981,8 @@ private:
     SessionQ<InboundLoadGo>        loadGo_;
     SessionQ<InboundLoadReq>       loadReq_;
     SessionQ<InboundLoadNack>      loadNack_;
+    SessionQ<InboundLoadReady>     loadReady_;
+    SessionQ<InboundModCheck>      modCheck_;
     // SESSION-PRESERVING: the host's join permissions (protocol 56) are a
     // session setting, not world state - a world swap must not drop them.
     SessionQ<InboundPerms>         perms_;

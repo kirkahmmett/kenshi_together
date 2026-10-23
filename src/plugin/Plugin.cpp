@@ -309,6 +309,134 @@ void onPermToggle(int which) {
     coopLog(b);
 }
 
+// ---- Ready barrier (protocol 59) -------------------------------------------
+// When the host sends a LOAD_GO (a new player joining, or everyone reloading)
+// it holds the game paused for everyone until each connected join reports it
+// has loaded that world and is back in gameplay - a player still on the loading
+// screen no longer falls behind a running world. READY_TIMEOUT_MS bounds it.
+std::set<coop::u32> g_readyWait;
+coop::u32           g_readyLoadId = 0;
+DWORD               g_readyStart  = 0;
+const DWORD         READY_TIMEOUT_MS = 90000;
+
+void startReadyWait(coop::u32 loadId) {
+    g_readyWait.clear();
+    for (std::set<coop::u32>::const_iterator it = g_peers.begin(); it != g_peers.end(); ++it)
+        if (*it != 0) g_readyWait.insert(*it);
+    if (g_readyWait.empty()) return;
+    g_readyLoadId = loadId;
+    g_readyStart  = GetTickCount();
+    char b[112];
+    _snprintf(b, sizeof(b) - 1, "[ready] holding the game until %u player(s) load (GO id=%u)",
+              (unsigned)g_readyWait.size(), (unsigned)loadId);
+    b[sizeof(b) - 1] = '\0';
+    coopLog(b);
+}
+
+// Join: tell the host we are back in gameplay after its LOAD_GO.
+void sendLoadReady() {
+    if (g_cfg.isHost || !g_peerPresent || g_loadIdSeen == 0) return;
+    coop::LoadReadyPacket r;
+    memset(&r, 0, sizeof(r));
+    r.type    = (coop::u8)coop::PKT_LOAD_READY;
+    r.ownerId = g_net.localId();
+    r.loadId  = g_loadIdSeen;
+    g_net.queueLoadReady(r);
+    char b[80];
+    _snprintf(b, sizeof(b) - 1, "[ready] loaded GO id=%u - told the host", (unsigned)g_loadIdSeen);
+    b[sizeof(b) - 1] = '\0';
+    coopLog(b);
+}
+
+void tickReady() {
+    std::deque<coop::InboundLoadReady> got;
+    g_inbound.drainLoadReadys(got);
+    if (!g_cfg.isHost) return;
+    for (std::deque<coop::InboundLoadReady>::iterator it = got.begin(); it != got.end(); ++it) {
+        if (it->pkt.loadId != g_readyLoadId || !g_readyWait.erase(it->ownerId)) continue;
+        char b[96];
+        _snprintf(b, sizeof(b) - 1, "[ready] player %u loaded (%u still loading)",
+                  (unsigned)it->ownerId, (unsigned)g_readyWait.size());
+        b[sizeof(b) - 1] = '\0';
+        coopLog(b);
+    }
+    // Someone who left is not waited for.
+    for (std::set<coop::u32>::iterator it = g_readyWait.begin(); it != g_readyWait.end();) {
+        if (!g_peers.count(*it)) g_readyWait.erase(it++); else ++it;
+    }
+    if (!g_readyWait.empty() && GetTickCount() - g_readyStart > READY_TIMEOUT_MS) {
+        char b[96];
+        _snprintf(b, sizeof(b) - 1, "[ready] TIMEOUT - %u player(s) still loading; resuming",
+                  (unsigned)g_readyWait.size());
+        b[sizeof(b) - 1] = '\0';
+        coopLog(b);
+        g_readyWait.clear();
+    }
+    static bool s_held = false;
+    bool hold = !g_readyWait.empty();
+    if (s_held && !hold) {
+        char b[80];
+        _snprintf(b, sizeof(b) - 1, "[ready] everyone loaded after %lu ms - resuming",
+                  (unsigned long)(GetTickCount() - g_readyStart));
+        b[sizeof(b) - 1] = '\0';
+        coopLog(b);
+    }
+    s_held = hold;
+    g_repl.setSpeedHold(hold);
+}
+
+// ---- Mod list check (v59) ---------------------------------------------------
+// FNV-1a over data\mods.cfg's non-empty lines, lower-cased, in load order. Only
+// a warning: same-name mods of different versions still hash the same.
+void readModList(coop::u32* hash, coop::u16* count) {
+    coop::u32 h = 2166136261u;
+    coop::u16 n = 0;
+    FILE* f = fopen("data\\mods.cfg", "r");
+    if (f) {
+        char line[512];
+        while (fgets(line, sizeof(line), f)) {
+            size_t k = strlen(line);
+            while (k > 0 && (line[k - 1] == '\n' || line[k - 1] == '\r' || line[k - 1] == ' ')) line[--k] = '\0';
+            if (k == 0) continue;
+            for (size_t i = 0; i < k; ++i) {
+                h ^= (coop::u32)(unsigned char)tolower((unsigned char)line[i]);
+                h *= 16777619u;
+            }
+            h ^= 0x0Au; h *= 16777619u; // line separator
+            ++n;
+        }
+        fclose(f);
+    }
+    *hash = h; *count = n;
+}
+
+std::map<coop::u32, std::string> g_modWarn; // player id -> warning text
+DWORD g_modWarnTick = 0;
+const DWORD MODWARN_BANNER_MS = 20000;
+
+void tickModCheck() {
+    std::deque<coop::InboundModCheck> got;
+    g_inbound.drainModMismatches(got);
+    for (std::deque<coop::InboundModCheck>::iterator it = got.begin(); it != got.end(); ++it) {
+        char b[160];
+        if (it->playerId == 0)
+            _snprintf(b, sizeof(b) - 1, "Warning: your mods differ from the host's (%u vs %u) - expect desync",
+                      (unsigned)it->ourCount, (unsigned)it->theirCount);
+        else
+            _snprintf(b, sizeof(b) - 1, "Warning: player %u has a different mod list (%u vs your %u)",
+                      (unsigned)it->playerId, (unsigned)it->theirCount, (unsigned)it->ourCount);
+        b[sizeof(b) - 1] = '\0';
+        g_modWarn[it->playerId] = b;
+        g_modWarnTick = GetTickCount();
+        coopLog((std::string("[mods] ") + b).c_str());
+    }
+    // Forget players who left.
+    for (std::map<coop::u32, std::string>::iterator it = g_modWarn.begin(); it != g_modWarn.end();) {
+        if (it->first != 0 && !g_peers.count(it->first)) g_modWarn.erase(it++); else ++it;
+    }
+    if (!g_peerPresent) g_modWarn.clear();
+}
+
 // What the joins are told (the same rule the host applies to itself).
 bool allowTakeForJoins() {
     char e[4];
@@ -966,6 +1094,7 @@ void driveSaveSync() {
                     go.fingerprint = coop::savexfer::folderFingerprint(g_bootstrapName);
                     strncpy(go.name, g_bootstrapName.c_str(), sizeof(go.name) - 1);
                     g_net.queueLoadGo(go);
+                    startReadyWait(go.loadId);
                     g_loadPumpArmTick = GetTickCount();
                     char b2[192];
                     _snprintf(b2, sizeof(b2) - 1,
@@ -1043,6 +1172,7 @@ void driveLoadSync(GameWorld* gw) {
             go.fingerprint = coop::savexfer::folderFingerprint(name);
             strncpy(go.name, name.c_str(), sizeof(go.name) - 1);
             g_net.queueLoadGo(go);
+            startReadyWait(go.loadId);
             g_loadPumpArmTick = GetTickCount();
             char b[160];
             _snprintf(b, sizeof(b) - 1,
@@ -1285,6 +1415,18 @@ void coopPanelDrive() {
         ostate = 0;
     }
     // Join: an action the host's settings refused just now says why.
+    if (!g_modWarn.empty() && GetTickCount() - g_modWarnTick < MODWARN_BANNER_MS) {
+        detail = g_modWarn.rbegin()->second;
+        ostate = 1;
+    }
+    if (g_cfg.isHost && !g_readyWait.empty()) {
+        char wb[96];
+        _snprintf(wb, sizeof(wb) - 1, "Paused - waiting for %u player(s) to finish loading",
+                  (unsigned)g_readyWait.size());
+        wb[sizeof(wb) - 1] = '\0';
+        detail = wb;
+        ostate = 1;
+    }
     if (g_permNoticeTick != 0 && GetTickCount() - g_permNoticeTick < PERM_NOTICE_MS) {
         if (g_permNoticeKind == 4)
             detail = "You can only take items from your own characters";
@@ -1431,6 +1573,7 @@ void tickWorldSwapEdge(GameWorld* gw) {
                 // inbound queues). Peer presence + suppression levers survive.
                 if (g_cfg.loadSync)
                     sessionResetForWorldReload();
+                sendLoadReady();
             }
         }
     }
@@ -2072,6 +2215,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     const unsigned __int64 perfHookT0 = g_perfWindowMs ? perfNow() : 0;
     ++g_tick;
     g_lastGw = gw; // cache for the argument-less F2 UI callbacks
+    coop::engine::noteMainThread();
 
 #ifdef KENSHICOOP_HARNESS
     // TEST-ONLY (KENSHICOOP_TEST_CRASH=<seconds>): fault on purpose, to prove the
@@ -2104,6 +2248,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
         g_gameStarted   = true;
         g_gameStartTick = GetTickCount();
         coopLog("KenshiCoop: gameplay started");
+        sendLoadReady();
         // Coordinated load (protocol 32): the title-screen auto-load fired the
         // load detour BEFORE gameplay - discard its queued edge here, or the
         // first driveLoadSync tick (g_gameStarted now true) would mistake it
@@ -2199,6 +2344,8 @@ void mainLoop_hook(GameWorld* gw, float dt) {
 
     KC_PERF(S_NET_EVENTS, processNetEvents(gw));
     KC_PERF(S_NET_EVENTS, tickPermissions());
+    KC_PERF(S_NET_EVENTS, tickReady());
+    KC_PERF(S_NET_EVENTS, tickModCheck());
     KC_PERF(S_NET_EVENTS, tickRoster(gw));
 
     // Coordinated load (protocol 32): the JOIN never loads locally while a
@@ -2408,6 +2555,15 @@ void startNetworking() {
     // friends interface comes with the invite layer (idempotent).
     if (coop::steamp2p::init()) coop::steaminvite::init(&coopUiConnect);
     g_net.setLocalName(coop::steaminvite::selfName());
+    {
+        coop::u32 mh = 0; coop::u16 mc = 0;
+        readModList(&mh, &mc);
+        g_net.setLocalMods(mh, mc);
+        char b[80];
+        _snprintf(b, sizeof(b) - 1, "[mods] %u enabled mod(s), list hash %08x", (unsigned)mc, (unsigned)mh);
+        b[sizeof(b) - 1] = '\0';
+        coopLog(b);
+    }
     bool ok;
     if (g_cfg.isHost) {
         coopLog("KenshiCoop: starting as HOST");

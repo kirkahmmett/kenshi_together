@@ -25,7 +25,7 @@ typedef double         f64;
 // this header stays a definition file. When you bump PROTOCOL_VERSION, add the
 // matching entry at the bottom of that doc. The version is checked at handshake
 // and a mismatch is rejected (no back-compat).
-const u16 PROTOCOL_VERSION = 58;
+const u16 PROTOCOL_VERSION = 59;
 
 // Packet type tags (first byte of every packet).
 enum PacketType {
@@ -79,7 +79,8 @@ enum PacketType {
     PKT_FIXTURE          = 48,// RELIABLE runtime-fixture identity row (protocol 55); FixturePacket
     PKT_PERMS            = 49,// RELIABLE host's join-permission settings (protocol 56); PermsPacket
     PKT_PEER_LEFT        = 50,// RELIABLE another player left (host -> joins, protocol 57); PeerLeftPacket
-    PKT_ROSTER           = 51 // RELIABLE one player's display name (host -> joins, protocol 57); RosterPacket
+    PKT_ROSTER           = 51,// RELIABLE one player's display name (host -> joins, protocol 57); RosterPacket
+    PKT_LOAD_READY       = 52 // RELIABLE a join finished loading a coordinated load (join -> host, v59); LoadReadyPacket
 };
 
 // One-shot transition events carried on the RELIABLE channel. Continuous state
@@ -144,6 +145,11 @@ struct WelcomePacket {
     u8  type;     // = PKT_WELCOME
     u16 version;  // host's PROTOCOL_VERSION (client re-checks)
     u32 playerId; // id the host assigned to this client
+    // v59 mod check: the host's enabled mod list (data\mods.cfg, in load order)
+    // as an FNV-1a hash + count. A join sends its own the same way, appended to
+    // HELLO after the name (u32 hash, u16 count). A mismatch only WARNS.
+    u32 modHash;
+    u16 modCount;
 };
 
 // A reliable one-shot transition. 'subject' is the hand the event happened TO; the
@@ -1616,6 +1622,16 @@ struct PeerLeftPacket {
 // join sends its own name in HELLO (nameLen + bytes); the host answers with one
 // RosterPacket per player, itself (id 0) included, on every connect and on a
 // slow resend. Host -> joins only. name is NOT NUL-terminated; nameLen counts it.
+// Protocol 59 (ready barrier): a join tells the host it finished loading the
+// world of LOAD_GO `loadId` and is back in gameplay. The host holds the game
+// paused for everyone until every connected join has said so (or a timeout).
+// Join -> host only.
+struct LoadReadyPacket {
+    u8  type;           // = PKT_LOAD_READY
+    u32 ownerId;        // the join
+    u32 loadId;         // the LOAD_GO it loaded
+};
+
 const unsigned int ROSTER_NAME_MAX = 32;
 struct RosterPacket {
     u8   type;          // = PKT_ROSTER

@@ -1,48 +1,61 @@
-﻿KenshiCoop - co-op mod
+﻿Kenshi Together 0.59.0 - co-op for Kenshi (mod folder: KenshiCoop)
 ======================
-
-This zip contains ONE folder: "KenshiCoop". That folder IS the mod.
 
 INSTALL (both players)
 ----------------------
   1. Right-click the downloaded zip > Properties > Unblock (if shown), then
-     extract it.
-  2. Copy the "KenshiCoop" folder into your Kenshi mods folder:
-       <Kenshi>\mods\
-     so you end up with:
-       <Kenshi>\mods\KenshiCoop\KenshiCoop.dll   (and the other files)
-     The default Steam path is:
-       C:\Program Files (x86)\Steam\steamapps\common\Kenshi\mods\
-  3. Launch Kenshi and enable "KenshiCoop" in the Mods menu.
+     extract it anywhere.
+  2. Close Kenshi, then double-click KenshiCoop-Setup.cmd.
+     It finds your Kenshi, installs RE_Kenshi (the free loader the co-op plugin
+     needs; downloaded from github.com/BFrizzleFoShizzle/RE_Kenshi and checked
+     against a fixed SHA-256), installs the KenshiCoop mod and enables it.
+     On Kenshi 1.0.68 it also creates the 1.0.65 game executable RE_Kenshi
+     runs on - your own 1.0.68 executable is not modified.
+  3. Start Kenshi normally. The main menu should read "RE_Kenshi 0.3.5".
 
-PREREQUISITES (both players)
+  Kenshi somewhere other than a Steam library? Run it from a command prompt:
+     KenshiCoop-Setup.cmd -KenshiDir "D:\Games\Kenshi"
+
+  Manual install (if you prefer): install RE_Kenshi 0.3.1+ yourself
+  (https://www.nexusmods.com/kenshi/mods/847), copy the "KenshiCoop" folder into
+  <Kenshi>\mods\ and enable "KenshiCoop" in Kenshi's Mods menu.
+
+PREREQUISITES (every player)
 ----------------------------
-  1. Kenshi 1.0.65 (Steam).
-  2. RE_Kenshi 0.3.1+ (free mod that loads the plugin):
-     https://www.nexusmods.com/kenshi/mods/847
-  3. For the Steam transport (recommended): Steam RUNNING and ONLINE on both
-     machines. No port forwarding, no IPs, no config editing - you swap Steam
-     IDs in-game (see PLAY below).
+  1. Kenshi 1.0.65 or 1.0.68 on Steam.
+  2. Steam RUNNING and ONLINE. No port forwarding, no IP addresses.
+  3. Everyone installs the SAME KenshiCoop release (the game refuses a
+     different version) and the same enabled mods.
 
-PLAY (Steam - recommended)
---------------------------
-  1. Press F2 to open the Co-op panel. It works at the MAIN MENU (before loading
-     a game) as well as in-game.
-  2. Swap Steam IDs: each player clicks "Copy my Steam ID" and sends it to the
-     other (Steam chat, Discord, etc.). When you receive your friend's ID, copy
-     it, then click "Paste friend's Steam ID" in your panel. The panel shows the
-     ID it captured. (This is per-session - re-paste it if you relaunch Kenshi.)
-  3. HOST: load the save you want to play (or start a new game), set Role: HOST,
-     leave Transport on STEAM, and toggle Connection to ONLINE.
-  4. JOIN: straight from the MAIN MENU - no save needed - set Role: JOIN, leave
-     Transport on STEAM, and toggle Connection to ONLINE. The host sends its
-     world to you on connect and you load right into it. (You do NOT need the
-     host's save beforehand. If you already have an identical copy on disk it is
-     used as-is instead of transferring.)
-  5. The white status line shows live state, and a status banner in the TOP-LEFT
-     corner shows it too - at the main menu as well as in-game, so a joining
-     player can watch the transfer before the world loads. Toggle Connection to
-     OFFLINE to leave.
+PLAY
+----
+  Press F2 for the Co-op panel (main menu or in game).
+
+  HOST - load your save or start a new game ("Multiplayer Wanderer" in
+  the New Game list is a ready two-squad start), press F2 and click
+  "Host for friends". Your game is now open to your Steam friends.
+  "Invite a Steam friend" also sends them a Steam invite.
+
+  JOIN - start Kenshi and stay at the MAIN MENU (no save needed). Press F2:
+  under "Join a friend" every Steam friend who is hosting is listed - click
+  "Join <name>'s game". The host's world is sent to you and loads by itself.
+
+  Each player controls their own squad tab, named after their Steam name. Any
+  game start works: a player without a tab gets a free one or a new character
+  of their own, and gets the same tab back next time.
+  The host's save is the shared save: only the host saves.
+  Leave with "Leave session" (join) or "Stop hosting" (host). A player who
+  leaves keeps their squad in the world as "<name> (away)": it stands still and
+  takes no melee damage until they come back.
+
+  Only the HOST pauses (Space, or "Pause game" in the panel) and picks the game
+  speed; trade and dialogue windows no longer stop the game for everyone.
+  Players can give items to each other but not take from another player's
+  characters, unless the host turns on "Players may take from each other"
+  (panel > Host settings).
+
+  The old screens (role / transport / Steam ID copy-paste, LAN) are under
+  "Advanced (IP / Steam ID)" at the bottom of the panel.
 
 PLAY (LAN / direct UDP - advanced)
 ----------------------------------
@@ -54,7 +67,10 @@ PLAY (LAN / direct UDP - advanced)
 
 UNINSTALL
 ---------
-  Delete <Kenshi>\mods\KenshiCoop. Nothing else is touched.
+  KenshiCoop-Setup.cmd -Uninstall                  removes the mod
+  KenshiCoop-Setup.cmd -Uninstall -RemoveReKenshi  also removes RE_Kenshi, if the
+                                                   installer put it there
+  The installer kept a backup of every file it edited (*.kenshicoop.bak).
 
 TROUBLESHOOTING
 ---------------
@@ -68,3 +84,4 @@ TROUBLESHOOTING
     '[steam] session ... active=1' in <Kenshi>\KenshiCoop_*.log.
   * "protocol mismatch": one player has an older/newer build; both should use
     the same release.
+

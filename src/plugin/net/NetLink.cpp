@@ -101,6 +101,7 @@ NetLink::NetLink()
       sendEpoch_(0),
       steamPeer_(0),
       steamOpen_(false),
+      modHash_(0), modCount_(0),
       relayed_(0),
       simDelayMs_(0), simJitterMs_(0), simLossPct_(0) {
     InitializeCriticalSection(&outCs_);
@@ -308,6 +309,7 @@ void NetLink::queueLoadGo(const LoadGoPacket& pkt) { pushLocked(outCs_, outLoadG
 void NetLink::queueLoadReq(const LoadReqPacket& pkt) { pushLocked(outCs_, outLoadReq_, pkt); }
 
 void NetLink::queueLoadNack(const LoadNackPacket& pkt) { pushLocked(outCs_, outLoadNack_, pkt); }
+void NetLink::queueLoadReady(const LoadReadyPacket& pkt) { pushLocked(outCs_, outLoadReady_, pkt); }
 
 void NetLink::setNetSim(unsigned int delayMs, unsigned int jitterMs, unsigned int lossPct) {
     simDelayMs_  = delayMs;
@@ -566,14 +568,17 @@ void NetLink::threadLoop() {
                         linkUp = true; gotWelcome = false;
                         setLastErr("");
                         // Introduce ourselves: protocol version + display name.
-                        unsigned char hb[sizeof(HelloPacket) + ROSTER_NAME_MAX];
+                        unsigned char hb[sizeof(HelloPacket) + ROSTER_NAME_MAX + 6];
                         HelloPacket h;
                         size_t nl = localName_.size();
                         if (nl > ROSTER_NAME_MAX) nl = ROSTER_NAME_MAX;
                         h.type = (u8)PKT_HELLO; h.version = PROTOCOL_VERSION; h.nameLen = (u8)nl;
                         std::memcpy(hb, &h, sizeof(h));
                         if (nl) std::memcpy(hb + sizeof(h), localName_.data(), nl);
-                        ENetPacket* out = enet_packet_create(hb, sizeof(h) + nl,
+                        // v59: our mod list fingerprint follows the name.
+                        std::memcpy(hb + sizeof(h) + nl, &modHash_, 4);
+                        std::memcpy(hb + sizeof(h) + nl + 4, &modCount_, 2);
+                        ENetPacket* out = enet_packet_create(hb, sizeof(h) + nl + 6,
                                                              ENET_PACKET_FLAG_RELIABLE);
                         enet_peer_send(ev.peer, CH_RELIABLE, out);
                         netLog("connected to host; sent HELLO");
@@ -617,6 +622,7 @@ void NetLink::threadLoop() {
                                 ev.peer->data = (void*)(size_t)id;
                                 WelcomePacket w;
                                 w.type = (u8)PKT_WELCOME; w.version = PROTOCOL_VERSION; w.playerId = id;
+                                w.modHash = modHash_; w.modCount = modCount_;
                                 ENetPacket* out =
                                     enet_packet_create(&w, sizeof(w), ENET_PACKET_FLAG_RELIABLE);
                                 enet_peer_send(ev.peer, CH_RELIABLE, out);
@@ -635,6 +641,12 @@ void NetLink::threadLoop() {
                                     if (len >= sizeof(HelloPacket) + nl && nl > 0)
                                         nm.assign((const char*)ev.packet->data + sizeof(HelloPacket), nl);
                                     if (!nm.empty()) inbound_->pushRoster(id, nm);
+                                    if (len >= sizeof(HelloPacket) + nl + 6) {
+                                        u32 jh = 0; u16 jc = 0;
+                                        std::memcpy(&jh, (const char*)ev.packet->data + sizeof(HelloPacket) + nl, 4);
+                                        std::memcpy(&jc, (const char*)ev.packet->data + sizeof(HelloPacket) + nl + 4, 2);
+                                        if (jh != modHash_) inbound_->pushModMismatch(id, jc, modCount_);
+                                    }
                                     inbound_->pushConnect(id);
                                 }
                             }
@@ -658,7 +670,11 @@ void NetLink::threadLoop() {
                                           (unsigned)w.playerId, (unsigned)PROTOCOL_VERSION);
                                 b[sizeof(b) - 1] = '\0';
                                 netLog(b);
-                                if (inbound_) inbound_->pushConnect(0); // host id = 0
+                                if (inbound_) {
+                                    if (w.modHash != modHash_)
+                                        inbound_->pushModMismatch(0, w.modCount, modCount_);
+                                    inbound_->pushConnect(0); // host id = 0
+                                }
                             }
                         }
                     } else if (type == PKT_ENTITY_BATCH) {
@@ -1081,6 +1097,14 @@ void NetLink::threadLoop() {
                         if (readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &lr)
                             && inbound_) {
                             inbound_->pushLoadReq(lr.ownerId, lr);
+                        }
+                    } else if (type == PKT_LOAD_READY) {
+                        // A join finished loading (protocol 59, join -> host).
+                        LoadReadyPacket lr;
+                        if (isHost_ &&
+                            readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &lr)
+                            && inbound_) {
+                            inbound_->pushLoadReady((u32)(size_t)ev.peer->data, lr);
                         }
                     } else if (type == PKT_LOAD_NACK) {
                         // Reliable copy-missing/diverged answer (protocol 32, join -> host).
@@ -2026,11 +2050,19 @@ void NetLink::threadLoop() {
         std::vector<LoadGoPacket>   loadGos;
         std::vector<LoadReqPacket>  loadReqs;
         std::vector<LoadNackPacket> loadNacks;
+        std::vector<LoadReadyPacket> loadReadys;
         EnterCriticalSection(&outCs_);
         loadGos.swap(outLoadGo_);
         loadReqs.swap(outLoadReq_);
         loadNacks.swap(outLoadNack_);
+        loadReadys.swap(outLoadReady_);
         LeaveCriticalSection(&outCs_);
+        for (size_t i = 0; i < loadReadys.size(); ++i) {
+            if (isHost_ || !serverPeer_ || serverPeer_->state != ENET_PEER_STATE_CONNECTED) continue;
+            enet_peer_send(serverPeer_, CH_RELIABLE,
+                           enet_packet_create(&loadReadys[i], sizeof(LoadReadyPacket),
+                                              ENET_PACKET_FLAG_RELIABLE));
+        }
         for (size_t i = 0; i < loadGos.size(); ++i) {
             ENetPacket* out = enet_packet_create(&loadGos[i], sizeof(LoadGoPacket),
                                                  ENET_PACKET_FLAG_RELIABLE);

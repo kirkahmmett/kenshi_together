@@ -74,7 +74,7 @@ static int g_total  = 0;
 static void testSizes() {
     std::printf("== wire struct sizes (the packed contract both clients memcpy) ==\n");
     CHECK_EQ("sizeof(HelloPacket)",             sizeof(HelloPacket),             4);
-    CHECK_EQ("sizeof(WelcomePacket)",           sizeof(WelcomePacket),           7);
+    CHECK_EQ("sizeof(WelcomePacket)",           sizeof(WelcomePacket),           13); // v59: + mod list
     CHECK_EQ("sizeof(EventPacket)",             sizeof(EventPacket),             54);
     CHECK_EQ("sizeof(EntityState)",             sizeof(EntityState),             79);
     CHECK_EQ("sizeof(EntityBatchHeader)",       sizeof(EntityBatchHeader),       14); // v35: +sendMs; v44: +epoch
@@ -122,6 +122,7 @@ static void testSizes() {
     CHECK_EQ("sizeof(PermsPacket)",             sizeof(PermsPacket),             9);  // v58: + takeFromPlayers
     CHECK_EQ("sizeof(PeerLeftPacket)",          sizeof(PeerLeftPacket),          5);  // v57: three players
     CHECK_EQ("sizeof(RosterPacket)",            sizeof(RosterPacket),            38); // v57: player names
+    CHECK_EQ("sizeof(LoadReadyPacket)",         sizeof(LoadReadyPacket),          9); // v59: ready barrier
     CHECK_EQ("sizeof(CamHintPacket)",           sizeof(CamHintPacket),           17); // v43: camera hint
     CHECK_EQ("sizeof(CellClaimPacket)",         sizeof(CellClaimPacket),         21); // v49: cell claim
     CHECK_EQ("sizeof(InvXferAckPacket)",        sizeof(InvXferAckPacket),        18); // v50: transfer verdict
@@ -314,8 +315,8 @@ static void testSizes() {
     CHECK_EQ("EVT_SQUAD_MOVE id", (int)EVT_SQUAD_MOVE, 11);
     CHECK("EVT_SQUAD_MOVE distinct", EVT_SQUAD_MOVE != EVT_RECRUIT &&
           EVT_SQUAD_MOVE != EVT_NONE && EVT_SQUAD_MOVE != EVT_EXIT_FURNITURE);
-    CHECK_EQ("PROTOCOL_VERSION (v58: take-from-players setting)",
-             (int)PROTOCOL_VERSION, 58);
+    CHECK_EQ("PROTOCOL_VERSION (v59: ready barrier)",
+             (int)PROTOCOL_VERSION, 59);
 
     // Protocol 52: the shared money pool. The two players spend from ONE wallet,
     // so the join reports CHANGES and the host the authoritative TOTAL - swap
@@ -502,6 +503,7 @@ static void testRoundTrips() {
     roundTrip<PermsPacket>("PermsPacket", (u8)PKT_PERMS);
     roundTrip<PeerLeftPacket>("PeerLeftPacket", (u8)PKT_PEER_LEFT);
     roundTrip<RosterPacket>("RosterPacket", (u8)PKT_ROSTER);
+    roundTrip<LoadReadyPacket>("LoadReadyPacket", (u8)PKT_LOAD_READY);
     roundTrip<CellClaimPacket>("CellClaimPacket", (u8)PKT_CELL_CLAIM);
     roundTrip<InvXferAckPacket>("InvXferAckPacket", (u8)PKT_INV_XFER_ACK);
 

@@ -53,3 +53,19 @@ build** after a bump.
   game for everyone - only Space or the panel's Pause button counts. A player
   who leaves becomes "<name> (away)": frozen and protected from melee damage
   until they return.
+
+## 59 - ready barrier and mod list check (stability)
+
+- `PKT_LOAD_READY` (52) / `LoadReadyPacket` (9 bytes), join -> host: "I loaded
+  the world of LOAD_GO `loadId` and am back in gameplay". After every LOAD_GO
+  the host holds the game paused for everyone until each connected join has
+  reported (90 s timeout; a player who leaves is not waited for). The host
+  shows "Paused - waiting for N player(s) to finish loading".
+- `WelcomePacket` gains `modHash` + `modCount` (13 bytes): the host's enabled
+  mod list (`data\mods.cfg`, lower-cased, in load order, FNV-1a). A join appends
+  its own (u32 hash, u16 count) to HELLO after the name. A mismatch only warns
+  ("Warning: player N has a different mod list" / "your mods differ from the
+  host's") for 20 s and in the log; it never refuses the connection.
+- Not on the wire: the inventory detours pass calls from any thread other than
+  the game's main thread straight to the engine (Kenshi's loader thread adds
+  items while a world loads).

@@ -2327,6 +2327,7 @@ void Replicator::syncSpeed(GameWorld* gw, Inbound& in, NetLink& net, u32 ownerId
         // the single peer slot also let the last request win. Joins still
         // report combat, which caps the speed at 1x.
         float eff = (speedMyReq_ >= 0.0f) ? speedMyReq_ : 1.0f;
+        if (speedHold_) eff = 0.0f; // ready barrier: a join is still loading
         bool combat = speedMyCombat_ || speedPeerCombat_;
         if (combat && speedCombatCap_ && eff > 1.0f) eff = 1.0f;
         bool changed = (speedLastSet_ < 0.0f || fabs(eff - speedLastSet_) > EPS);

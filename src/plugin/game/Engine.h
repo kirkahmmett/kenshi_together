@@ -773,6 +773,10 @@ int createPlayerSquad(GameWorld* gw, const char* name);
 // Off by default in a session: taking only from your own characters; giving is
 // always allowed. Set on every client from the host's setting.
 void setTakeFromPlayers(bool allowed);
+// Record the game's main thread (call from the main loop). The inventory
+// detours pass calls from any other thread straight to the engine.
+void noteMainThread();
+unsigned long offMainInventoryCalls();
 unsigned int permRefusalSeq();
 int          permRefusalKind();
 

@@ -697,7 +697,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             char cap[48];
             _snprintf(cap, sizeof(cap) - 1, "Multiplayer    (F%d)", panelVk - VK_F1 + 1);
             cap[sizeof(cap) - 1] = '\0';
-            std::string title = "KenshiCoop", empty = "";
+            std::string title = "Kenshi Together", empty = "";
             std::string k0 = "mp", v0 = cap, k1 = "qj", v1, k2 = "Hosting", v2;
             SimpleRow rows[3];
             int n = 0;
@@ -837,7 +837,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
         sig += st->gamePaused ? "Z" : "z";
         if (g_panel.needsRebuild || !g_panel.built || sig != g_lastSimpleSig) {
             char titleBuf[64];
-            _snprintf(titleBuf, sizeof(titleBuf) - 1, "Co-op    -    F%d to close",
+            _snprintf(titleBuf, sizeof(titleBuf) - 1, "Kenshi Together    -    F%d to close",
                       panelVk - VK_F1 + 1);
             titleBuf[sizeof(titleBuf) - 1] = '\0';
             std::string title = titleBuf;
@@ -962,7 +962,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
     // (Re)populate the rows when anything visible changed (advanced view).
     if (g_panel.panel && g_panel.advanced && (g_panel.needsRebuild || !g_panel.built)) {
         char titleBuf[64];
-        _snprintf(titleBuf, sizeof(titleBuf) - 1, "Co-op Session    -    F%d to close",
+        _snprintf(titleBuf, sizeof(titleBuf) - 1, "Kenshi Together (advanced)    -    F%d to close",
                   panelVk - VK_F1 + 1);
         titleBuf[sizeof(titleBuf) - 1] = '\0';
         std::string title    = titleBuf;

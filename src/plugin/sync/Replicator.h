@@ -2436,6 +2436,9 @@ public:
     // crossing of bandit country into a five-fold slower run for no benefit,
     // since the squad is fleeing the fight rather than resolving it.
     void setSpeedCombatCap(bool on) { speedCombatCap_ = on; }
+    // Ready barrier (protocol 59): while set, the host's effective speed is
+    // pause for everyone (a join is still loading).
+    void setSpeedHold(bool on) { speedHold_ = on; }
     // Who authors the region containing (x,z)? The claimant, or the HOST when
     // the feature is off, the cell is unclaimed, or the mapping is unavailable.
     // Never returns "nobody" - an unowned region is the case this exists to
@@ -2523,6 +2526,7 @@ private:
     float         speedMyReq_;         // this client's current request
     float         speedPeerReq_;       // host only: the join's latest request (-1 = none yet)
     bool          speedCombatCap_;     // false = do NOT pin to 1x while fighting
+    bool          speedHold_;          // ready barrier: hold everyone paused
     bool          speedMyCombat_;      // own-squad in-combat flag (~1 Hz sample)
     bool          speedPeerCombat_;    // host only: the join's reported combat bit
     float         speedLastSet_;       // host: last broadcast effective; join: last received

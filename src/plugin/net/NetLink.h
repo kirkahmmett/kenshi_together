@@ -149,6 +149,8 @@ public:
     void queueRoster(const RosterPacket& pkt);
     // Our display name, sent in HELLO by a join. Call before start().
     void setLocalName(const std::string& name) { localName_ = name; }
+    // Our enabled mod list fingerprint (v59 mod check). Call before start().
+    void setLocalMods(u32 hash, u16 count) { modHash_ = hash; modCount_ = count; }
     void queueBuildPlace(const BuildPlacePacket& pkt);
     void queueBuildState(const BuildStatePacket& pkt);
     void queueBuildDoor(const BuildDoorPacket& pkt);
@@ -197,6 +199,7 @@ public:
     void queueLoadGo(const LoadGoPacket& pkt);
     void queueLoadReq(const LoadReqPacket& pkt);
     void queueLoadNack(const LoadNackPacket& pkt);
+    void queueLoadReady(const LoadReadyPacket& pkt); // join -> host (v59)
 
     // Debug WAN simulation. When delayMs > 0, received entity batches are held in a
     // net-thread queue and delivered to the game thread only after delayMs +/- jitter
@@ -330,6 +333,8 @@ private:
     std::vector<PermsPacket>     outPerms_;
     std::vector<RosterPacket>    outRoster_;
     std::string                  localName_;
+    u32                          modHash_;
+    u16                          modCount_;
     std::vector<BuildPlacePacket> outBuildPlace_;
     std::vector<BuildStatePacket> outBuildState_;
     std::vector<BuildDoorPacket>  outBuildDoor_;
@@ -357,6 +362,7 @@ private:
     std::vector<LoadGoPacket>    outLoadGo_;
     std::vector<LoadReqPacket>   outLoadReq_;
     std::vector<LoadNackPacket>  outLoadNack_;
+    std::vector<LoadReadyPacket> outLoadReady_;
 
     HANDLE        thread_;
     volatile LONG running_;

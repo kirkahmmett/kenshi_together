@@ -1,4 +1,4 @@
-KenshiCoop - Kurulum ve Oynama Rehberi (Türkçe)
+Kenshi Together - Kurulum ve Oynama Rehberi (Türkçe)
 ================================================
 
 Bu paketi HER OYUNCU kurmalı ve herkes aynı zip'ten kurmalı; sürümler farklıysa

@@ -128,7 +128,7 @@ foreach ($f in "KenshiCoop-Setup.cmd", "KenshiCoop-Setup.ps1") {
 # Top-level README (sibling to the KenshiCoop folder, so it is NOT copied into
 # the game).
 @'
-KenshiCoop __VERSION__ - co-op mod
+Kenshi Together __VERSION__ - co-op for Kenshi (mod folder: KenshiCoop)
 ======================
 
 INSTALL (both players)

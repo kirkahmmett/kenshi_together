@@ -734,7 +734,9 @@ static bool handIsBuilding(const unsigned int h[5]) {
 }
 
 BuyItemFn g_buyItemOrig = 0;
+static bool offMainThread(); // below, with the inventory detours
 Item* __fastcall buyItem_hook(Inventory* self, Item* itemToBuy, RootObject* sendingTo) {
+    if (offMainThread()) return g_buyItemOrig(self, itemToBuy, sendingTo);
     // Host setting (protocol 56): a join the host forbade from buying gets no
     // item and pays nothing - the original is never called.
     if (!g_permBuy) { notePermRefusal(3, "buying from traders"); return 0; }
@@ -822,9 +824,32 @@ static bool sourceHandOfItem(Item* item, unsigned int out[5]) {
     return (out[0] || out[1] || out[2] || out[3] || out[4]);
 }
 
+// The inventory detours keep main-thread state (the pending remove, the owner
+// sets the classifier reads, the refusal counters). Kenshi also adds and moves
+// items on its LOADING thread while a world loads; touching that state from there
+// races the main thread - suspected in the load-time heap corruption seen in
+// tests (2026-10-23). A player's drag, drop and buy all run on the main thread,
+// so anything else goes straight to the engine.
+static DWORD         g_mainThreadId  = 0;
+static unsigned long g_offMainCalls  = 0;
+void noteMainThread() { if (!g_mainThreadId) g_mainThreadId = GetCurrentThreadId(); }
+static bool offMainThread() {
+    if (!g_mainThreadId || GetCurrentThreadId() == g_mainThreadId) return false;
+    if (g_offMainCalls++ == 0) {
+        char b[112];
+        _snprintf(b, sizeof(b) - 1, "[xfer] inventory detour called off the main thread "
+                  "(thread %lu) - passed straight through", (unsigned long)GetCurrentThreadId());
+        b[sizeof(b) - 1] = '\0';
+        coop::logLine(b);
+    }
+    return true;
+}
+unsigned long offMainInventoryCalls() { return g_offMainCalls; }
+
 Item* __fastcall removeDontDestroy_hook(Inventory* self, Item* it, int howmany,
                                         bool returnCopyIfSomeLeft) {
     Item* r = g_removeDontDestroyOrig(self, it, howmany, returnCopyIfSomeLeft);
+    if (offMainThread()) return r;
     if ((g_blockXfer || xferDumpFlag() || !g_permContainers || !g_permTake) && !g_invVetoSuspend) {
         __try {
             g_pendRemItem = r ? r : it; g_pendRemInv = self;
@@ -841,6 +866,7 @@ Item* __fastcall removeDontDestroy_hook(Inventory* self, Item* it, int howmany,
 }
 
 bool __fastcall tryAddItem_hook(Inventory* self, Item* item, int quantity) {
+    if (offMainThread()) return g_tryAddItemOrig(self, item, quantity);
     if ((g_blockXfer || xferDumpFlag() || !g_permContainers || !g_permTake) && !g_invVetoSuspend &&
         g_invOwnerClass && self && item) {
         int decision = 0; // 1 = cross-owner veto, 2 = host refused storage for joins
@@ -956,6 +982,7 @@ static bool invListsItem(Inventory* inv, Item* it) {
 }
 
 void __fastcall dropItem_hook(Inventory* self, Item* it) {
+    if (offMainThread()) { g_dropItemOrig(self, it); return; }
     // A player may not drop another player's items. The owner's client keeps
     // publishing that character's inventory, so the item would stay with them AND
     // lie on our ground - a duplicate. Our own sync drops (applying the owner's

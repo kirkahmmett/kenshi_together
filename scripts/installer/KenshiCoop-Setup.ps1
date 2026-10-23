@@ -317,7 +317,7 @@ function Invoke-Uninstall([string]$k) {
 # ---- main --------------------------------------------------------------------
 
 Write-Host ""
-Write-Host "KenshiCoop setup" -ForegroundColor White
+Write-Host "Kenshi Together setup (KenshiCoop mod)" -ForegroundColor White
 if ($DryRun) { Warn "dry run - nothing will be changed" }
 
 Step "Kenshi"
