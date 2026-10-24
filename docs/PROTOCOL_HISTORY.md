@@ -85,3 +85,13 @@ build** after a bump.
   edit also reloads everyone).
 - Test lever `KENSHICOOP_LOOK_TEST=N`: a join opens the editor N s into the game
   and closes it 4 s later.
+
+## 61 - resync request
+
+- `PKT_RESYNC_REQ` (54) / `ResyncReqPacket` (5 bytes), join -> host: the panel's
+  "Resync" button. The host saves the live world and every client reloads it
+  (the coordinated reload a new player's squad uses); at most one every 30 s.
+- Not on the wire: "Save a problem report" copies this client's logs, crash
+  dumps, mods.cfg and a short report.txt into a Desktop folder.
+- Test lever `KENSHICOOP_RESYNC_TEST=N`: a join saves a report and asks for a
+  resync N s into the game.

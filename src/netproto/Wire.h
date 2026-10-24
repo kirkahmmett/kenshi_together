@@ -25,7 +25,7 @@ typedef double         f64;
 // this header stays a definition file. When you bump PROTOCOL_VERSION, add the
 // matching entry at the bottom of that doc. The version is checked at handshake
 // and a mismatch is rejected (no back-compat).
-const u16 PROTOCOL_VERSION = 60;
+const u16 PROTOCOL_VERSION = 61;
 
 // Packet type tags (first byte of every packet).
 enum PacketType {
@@ -81,7 +81,8 @@ enum PacketType {
     PKT_PEER_LEFT        = 50,// RELIABLE another player left (host -> joins, protocol 57); PeerLeftPacket
     PKT_ROSTER           = 51,// RELIABLE one player's display name (host -> joins, protocol 57); RosterPacket
     PKT_LOAD_READY       = 52,// RELIABLE a join finished loading a coordinated load (join -> host, v59); LoadReadyPacket
-    PKT_CHAR_LOOK        = 53 // RELIABLE character editor offer / result (v60); CharLookHeader + name + race + appearance
+    PKT_CHAR_LOOK        = 53,// RELIABLE character editor offer / result (v60); CharLookHeader + name + race + appearance
+    PKT_RESYNC_REQ       = 54 // RELIABLE a join asks the host to resync everyone (v61); ResyncReqPacket
 };
 
 // One-shot transition events carried on the RELIABLE channel. Continuous state
@@ -1642,6 +1643,14 @@ struct LoadReadyPacket {
 //         the appearance GameData as written by GameData::saveToFile. The host
 //         writes it into its copy, saves, and reloads everyone so all clients
 //         share the result. Not relayed.
+// Protocol 61: a join asks the host to resync everyone (the panel's "Resync"
+// button). The host saves the live world and every client reloads it - the
+// same coordinated reload a new player's squad uses. Join -> host only.
+struct ResyncReqPacket {
+    u8  type;     // = PKT_RESYNC_REQ
+    u32 ownerId;  // the join asking
+};
+
 const u8  CHAR_LOOK_OFFER    = 0;
 const u8  CHAR_LOOK_APPLY    = 1;
 const u16 CHAR_LOOK_NAME_MAX = 48;

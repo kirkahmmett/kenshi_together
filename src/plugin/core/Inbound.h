@@ -729,6 +729,12 @@ public:
         InboundLoadNack ln; ln.ownerId = ownerId; ln.pkt = pkt;
         EnterCriticalSection(&cs_); loadNack_.push_back(ln); LeaveCriticalSection(&cs_);
     }
+    void pushResyncReq(u32 senderId) {
+        EnterCriticalSection(&cs_); resyncReq_.push_back(senderId); LeaveCriticalSection(&cs_);
+    }
+    void drainResyncReqs(std::deque<u32>& out) {
+        EnterCriticalSection(&cs_); out.swap(resyncReq_); LeaveCriticalSection(&cs_);
+    }
     void pushCharLook(u32 senderId, const CharLookHeader& hdr, const u8* tail) {
         InboundCharLook cl;
         cl.senderId = senderId;
@@ -1007,6 +1013,7 @@ private:
     SessionQ<InboundLoadReady>     loadReady_;
     SessionQ<InboundModCheck>      modCheck_;
     SessionQ<InboundCharLook>      charLook_;
+    SessionQ<u32>                  resyncReq_; // v61: join ids asking for a resync
     // SESSION-PRESERVING: the host's join permissions (protocol 56) are a
     // session setting, not world state - a world swap must not drop them.
     SessionQ<InboundPerms>         perms_;

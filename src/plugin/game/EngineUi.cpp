@@ -408,6 +408,12 @@ void onHostSetBtn(DataPanelLine*) {
 }
 void (*g_newGameCycleFn)(int) = 0;
 void (*g_editLookFn)() = 0;
+void (*g_resyncFn)() = 0;
+void (*g_reportFn)() = 0;
+DataPanelLine* g_resyncBtn = 0;
+DataPanelLine* g_reportBtn = 0;
+void onResyncBtn(DataPanelLine*) { if (g_resyncFn) g_resyncFn(); g_panel.needsRebuild = true; }
+void onReportBtn(DataPanelLine*) { if (g_reportFn) g_reportFn(); g_panel.needsRebuild = true; }
 DataPanelLine* g_editLookBtn = 0;
 void onEditLookBtn(DataPanelLine*) {
     if (g_editLookFn) g_editLookFn();
@@ -628,6 +634,8 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
     g_autoHostToggleFn = st->onAutoHostToggle;
     g_newGameCycleFn = st->onNewGameCycle;
     g_editLookFn = st->onEditLook;
+    g_resyncFn = st->onResync;
+    g_reportFn = st->onReport;
     g_pauseToggleFn = st->onPauseToggle;
     ForgottenGUI* g = ::gui; // KenshiLib data export (spike 46)
     { static void* s_last = (void*)-1;
@@ -879,7 +887,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             for (int i = 0; i < 4; ++i) g_permBtns[i] = 0;
             g_inviteBtn = 0; g_hostSetBtn = 0; g_autoHostBtn = 0; g_pauseBtn = 0;
             g_newGameBtns[0] = 0; g_newGameBtns[1] = 0;
-            g_editLookBtn = 0;
+            g_editLookBtn = 0; g_resyncBtn = 0; g_reportBtn = 0;
 #define ROW(k, kk, vv, o) do { if (n < SIMPLE_ROWS_MAX) { keys[n] = (kk); vals[n] = (vv); \
             rows[n].kind = (k); rows[n].key = &keys[n]; rows[n].val = &vals[n]; \
             rows[n].out = (DataPanelLine**)(o); ++n; } } while (0)
@@ -919,6 +927,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                 ROW(0, "Status", "Status: " + statusVal, &statusLine);
                 ROW(2, "", "", 0);
                 ROW(1, "adv", "Advanced (IP / Steam ID)", &g_advBtn);
+                if (st->onReport) ROW(1, "report", "Save a problem report (to your Desktop)", &g_reportBtn);
             } else {
                 ROW(0, "Status", "Status: " + statusVal, &statusLine);
                 if (!players.empty()) ROW(0, "Players", "Players: " + players, &infoLines[infoN++]);
@@ -927,6 +936,9 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                                            ? std::string("Editing your character - close the editor when done")
                                            : std::string("Edit my character"),
                         &g_editLookBtn);
+                if (st->onResync)
+                    ROW(1, "resync", "Resync    (everyone reloads the host's world, ~10 s)", &g_resyncBtn);
+                if (st->onReport) ROW(1, "report", "Save a problem report (to your Desktop)", &g_reportBtn);
                 ROW(2, "", "", 0);
                 if (st->isHost) {
                     if (g_pauseToggleFn)
@@ -983,6 +995,8 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             for (int i = 0; i < 2; ++i)
                 if (g_newGameBtns[i]) g_newGameBtns[i]->callback = MyGUI::newDelegate(&onNewGameBtn);
             if (g_editLookBtn) g_editLookBtn->callback = MyGUI::newDelegate(&onEditLookBtn);
+            if (g_resyncBtn) g_resyncBtn->callback = MyGUI::newDelegate(&onResyncBtn);
+            if (g_reportBtn) g_reportBtn->callback = MyGUI::newDelegate(&onReportBtn);
             for (int i = 0; i < GAME_ROWS_MAX; ++i)
                 if (g_gameBtns[i]) g_gameBtns[i]->callback = MyGUI::newDelegate(&onGameBtn);
             for (int i = 0; i < INVITE_ROWS_MAX; ++i)

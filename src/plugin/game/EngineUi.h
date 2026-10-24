@@ -98,6 +98,10 @@ struct CoopPanelState {
     // on your own character (null = hidden); lookEditing while it is open.
     void               (*onEditLook)();
     bool               lookEditing;
+    // "Resync" (in a session: everyone reloads the host's live world) and
+    // "Save a problem report" (logs to a Desktop folder). Null = hidden.
+    void               (*onResync)();
+    void               (*onReport)();
 };
 // The panel's role/transport selections at the moment Connect is hit. peerId is the
 // Steam ID pasted in-panel this session (0 if none), and overrides the config

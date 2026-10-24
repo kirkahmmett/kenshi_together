@@ -202,6 +202,7 @@ public:
     void queueLoadReady(const LoadReadyPacket& pkt); // join -> host (v59)
     // v60 character editor: header + name + race + appearance bytes. Host:
     // broadcast (an OFFER names its target); join: to the host.
+    void queueResyncReq(const ResyncReqPacket& pkt); // join -> host (v61)
     void queueCharLook(const CharLookHeader& hdr, const std::string& name,
                        const std::string& race, const std::vector<u8>& data);
 
@@ -368,6 +369,7 @@ private:
     std::vector<LoadNackPacket>  outLoadNack_;
     std::vector<LoadReadyPacket> outLoadReady_;
     std::vector<std::vector<u8> > outCharLook_; // whole packets
+    std::vector<ResyncReqPacket>  outResyncReq_;
 
     HANDLE        thread_;
     volatile LONG running_;

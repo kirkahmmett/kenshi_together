@@ -310,6 +310,7 @@ void NetLink::queueLoadReq(const LoadReqPacket& pkt) { pushLocked(outCs_, outLoa
 
 void NetLink::queueLoadNack(const LoadNackPacket& pkt) { pushLocked(outCs_, outLoadNack_, pkt); }
 void NetLink::queueLoadReady(const LoadReadyPacket& pkt) { pushLocked(outCs_, outLoadReady_, pkt); }
+void NetLink::queueResyncReq(const ResyncReqPacket& pkt) { pushLocked(outCs_, outResyncReq_, pkt); }
 void NetLink::queueCharLook(const CharLookHeader& hdr, const std::string& name,
                             const std::string& race, const std::vector<u8>& data) {
     std::vector<u8> pk(sizeof(CharLookHeader));
@@ -1107,6 +1108,12 @@ void NetLink::threadLoop() {
                             && inbound_) {
                             inbound_->pushLoadReq(lr.ownerId, lr);
                         }
+                    } else if (type == PKT_RESYNC_REQ) {
+                        // v61: a join asks the host to resync everyone.
+                        ResyncReqPacket rr;
+                        if (isHost_ && inbound_ &&
+                            readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &rr))
+                            inbound_->pushResyncReq((u32)(size_t)ev.peer->data);
                     } else if (type == PKT_CHAR_LOOK) {
                         // v60 character editor: [CharLookHeader][name][race][appearance].
                         const unsigned len = (unsigned)ev.packet->dataLength;
@@ -2082,9 +2089,17 @@ void NetLink::threadLoop() {
         loadReadys.swap(outLoadReady_);
         LeaveCriticalSection(&outCs_);
         std::vector<std::vector<u8> > charLooks;
+        std::vector<ResyncReqPacket> resyncReqs;
         EnterCriticalSection(&outCs_);
         charLooks.swap(outCharLook_);
+        resyncReqs.swap(outResyncReq_);
         LeaveCriticalSection(&outCs_);
+        for (size_t i = 0; i < resyncReqs.size(); ++i) {
+            if (isHost_ || !serverPeer_ || serverPeer_->state != ENET_PEER_STATE_CONNECTED) continue;
+            enet_peer_send(serverPeer_, CH_RELIABLE,
+                           enet_packet_create(&resyncReqs[i], sizeof(ResyncReqPacket),
+                                              ENET_PACKET_FLAG_RELIABLE));
+        }
         for (size_t i = 0; i < charLooks.size(); ++i) {
             ENetPacket* out = enet_packet_create(&charLooks[i][0], charLooks[i].size(),
                                                  ENET_PACKET_FLAG_RELIABLE);

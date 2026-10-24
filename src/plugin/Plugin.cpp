@@ -22,6 +22,8 @@
 #include <kenshi/gui/TitleScreen.h> // TitleScreen::_NV_update (auto-load trigger)
 
 #include <windows.h>
+#include <shlobj.h>                  // SHGetFolderPathA (problem report -> Desktop)
+#pragma comment(lib, "shell32.lib")
 #include <cstdio>
 #include <string>
 #include <deque>
@@ -1109,6 +1111,137 @@ void tickLook(GameWorld* gw) {
     }
 }
 
+// ---- Resync (protocol 61) and problem report ----------------------------------
+// Resync: the host saves the live world and every client reloads it (the same
+// coordinated reload a new player's squad uses). A join asks with
+// PKT_RESYNC_REQ. One every RESYNC_MIN_MS, so a stuck button cannot loop it.
+DWORD       g_resyncTick = 0;
+const DWORD RESYNC_MIN_MS = 30000;
+std::string g_uiNotice;
+DWORD       g_uiNoticeTick = 0;
+const DWORD UI_NOTICE_MS = 8000;
+
+void uiNotice(const std::string& msg) { g_uiNotice = msg; g_uiNoticeTick = GetTickCount(); }
+
+void hostResync(coop::u32 askedBy) {
+    DWORD now = GetTickCount();
+    char b[128];
+    if (!g_cfg.saveSync || !g_gameStarted) {
+        coopLog("[resync] not available (no save sync or not in a game)");
+        return;
+    }
+    if (g_resyncTick != 0 && now - g_resyncTick < RESYNC_MIN_MS) {
+        _snprintf(b, sizeof(b) - 1, "[resync] request from player %u ignored (one every %lu s)",
+                  (unsigned)askedBy, (unsigned long)(RESYNC_MIN_MS / 1000));
+        b[sizeof(b) - 1] = '\0'; coopLog(b);
+        return;
+    }
+    g_resyncTick = now;
+    _snprintf(b, sizeof(b) - 1, "[resync] player %u asked - saving and reloading everyone", (unsigned)askedBy);
+    b[sizeof(b) - 1] = '\0'; coopLog(b);
+    uiNotice("Resync: everyone reloads the host's world");
+    g_bootReloadHost = true;
+    armConnectPush();
+}
+
+void onResyncRequest() {
+    if (g_cfg.isHost) { hostResync(0); return; }
+    coop::ResyncReqPacket r;
+    memset(&r, 0, sizeof(r));
+    r.type = (coop::u8)coop::PKT_RESYNC_REQ;
+    r.ownerId = g_net.localId();
+    g_net.queueResyncReq(r);
+    coopLog("[resync] asked the host to resync everyone");
+    uiNotice("Resync requested - the host will reload everyone");
+}
+
+void onReportRequest(); // below
+void tickResync() {
+    // Test lever (KENSHICOOP_RESYNC_TEST=N): a join saves a problem report and
+    // asks for a resync N s into the game - the panel buttons without a mouse.
+    static int rsTestS = -1;
+    static bool rsTestFired = false;
+    if (rsTestS < 0) {
+        const char* e = getenv("KENSHICOOP_RESYNC_TEST");
+        rsTestS = (e && e[0]) ? atoi(e) : 0;
+    }
+    if (rsTestS > 0 && !rsTestFired && !g_cfg.isHost && g_peerPresent && g_gameStarted &&
+        GetTickCount() - g_gameStartTick >= (DWORD)rsTestS * 1000u) {
+        rsTestFired = true;
+        coopLog("[resync] TEST: report + resync request");
+        onReportRequest();
+        onResyncRequest();
+    }
+    std::deque<coop::u32> got;
+    g_inbound.drainResyncReqs(got);
+    if (!g_cfg.isHost) return;
+    for (std::deque<coop::u32>::iterator it = got.begin(); it != got.end(); ++it) hostResync(*it);
+}
+
+// Problem report: copy this client's logs into a fresh Desktop folder the player
+// can zip and send. Plain file copies - nothing leaves the machine by itself.
+void onReportRequest() {
+    char desk[MAX_PATH];
+    if (FAILED(SHGetFolderPathA(0, CSIDL_DESKTOPDIRECTORY, 0, 0, desk))) {
+        coopErr("[report] Desktop folder not found");
+        uiNotice("Could not find your Desktop folder");
+        return;
+    }
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    char leaf[64];
+    _snprintf(leaf, sizeof(leaf) - 1, "KenshiTogether-report-%04u%02u%02u-%02u%02u%02u",
+              t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+    leaf[sizeof(leaf) - 1] = '\0';
+    std::string dir = std::string(desk) + "\\" + leaf;
+    if (!CreateDirectoryA(dir.c_str(), 0)) { coopErr("[report] could not create the folder"); return; }
+    const char* files[] = { "KenshiCoop_host.log", "KenshiCoop_join.log", "kenshi.log",
+                            "RE_Kenshi_log.txt", "KenshiCoop_prefs.txt", "data\\mods.cfg" };
+    unsigned int copied = 0;
+    // The log this session is writing first (a custom KENSHICOOP_LOG path is not
+    // one of the default names), then the usual files beside the game.
+    std::vector<std::string> srcs;
+    if (!g_cfg.logPath.empty()) srcs.push_back(g_cfg.logPath);
+    for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); ++i)
+        if (g_cfg.logPath != files[i]) srcs.push_back(files[i]);
+    for (size_t i = 0; i < srcs.size(); ++i) {
+        std::string src = srcs[i];
+        std::string base = src.substr(src.find_last_of('\\') == std::string::npos ? 0
+                                      : src.find_last_of('\\') + 1);
+        if (CopyFileA(src.c_str(), (dir + "\\" + base).c_str(), FALSE)) ++copied;
+    }
+    WIN32_FIND_DATAA fd;
+    HANDLE fh = FindFirstFileA("crashDump*", &fd);
+    if (fh != INVALID_HANDLE_VALUE) {
+        do {
+            if (CopyFileA(fd.cFileName, (dir + "\\" + fd.cFileName).c_str(), FALSE)) ++copied;
+        } while (FindNextFileA(fh, &fd));
+        FindClose(fh);
+    }
+    FILE* f = fopen((dir + "\\report.txt").c_str(), "w");
+    if (f) {
+        fprintf(f, "Kenshi Together problem report\n");
+        fprintf(f, "time: %04u-%02u-%02u %02u:%02u:%02u\n", t.wYear, t.wMonth, t.wDay,
+                t.wHour, t.wMinute, t.wSecond);
+        fprintf(f, "plugin build: %s %s, protocol %u\n", __DATE__, __TIME__,
+                (unsigned)coop::PROTOCOL_VERSION);
+        fprintf(f, "role: %s, local id %u, connected: %s, in game: %s\n",
+                g_cfg.isHost ? "host" : "join", (unsigned)g_net.localId(),
+                g_peerPresent ? "yes" : "no", g_gameStarted ? "yes" : "no");
+        for (std::map<coop::u32, std::string>::const_iterator it = g_names.begin(); it != g_names.end(); ++it)
+            fprintf(f, "player %u: %s%s\n", (unsigned)it->first, it->second.c_str(),
+                    it->first == g_net.localId() ? " (you)" :
+                    (it->first == 0 || g_peers.count(it->first)) ? "" : " (not connected)");
+        fprintf(f, "\nWhat happened (write it here before sending):\n\n");
+        fclose(f);
+        ++copied;
+    }
+    char b[200];
+    _snprintf(b, sizeof(b) - 1, "[report] saved %u file(s) to Desktop \\ %s", copied, leaf);
+    b[sizeof(b) - 1] = '\0'; coopLog(b);
+    uiNotice(std::string("Report saved on your Desktop: ") + leaf);
+}
+
 // Drain peer connect/leave events and surface a single game-thread confirmation
 // per event. The net thread already logs the handshake; this proves the event
 // reached the game thread cleanly (and is where later stages spawn/sweep).
@@ -1678,6 +1811,10 @@ void coopPanelDrive() {
         detail = "Customize your character - close the editor when done";
         ostate = 1;
     }
+    if (!g_uiNotice.empty() && GetTickCount() - g_uiNoticeTick < UI_NOTICE_MS) {
+        detail = g_uiNotice;
+        ostate = 1;
+    }
     if (!g_modWarn.empty() && GetTickCount() - g_modWarnTick < MODWARN_BANNER_MS) {
         detail = g_modWarn.rbegin()->second;
         ostate = 1;
@@ -1778,6 +1915,8 @@ void coopPanelDrive() {
     ps.onNewGameCycle = &onNewGameCycle;
     ps.onEditLook  = (g_peerPresent && realSession()) ? &onEditLookRequest : 0;
     ps.lookEditing = g_lookEditing;
+    ps.onResync = (g_peerPresent && realSession() && g_cfg.saveSync) ? &onResyncRequest : 0;
+    ps.onReport = &onReportRequest;
     // Only the host pauses, and only on purpose (Space / panel button);
     // trade and dialogue windows no longer stop the game for everyone.
     coop::engine::setMultiplayerPauseRules(g_net.isRunning());
@@ -2650,6 +2789,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     KC_PERF(S_NET_EVENTS, tickReady());
     KC_PERF(S_NET_EVENTS, tickModCheck());
     KC_PERF(S_NET_EVENTS, tickLook(gw));
+    KC_PERF(S_NET_EVENTS, tickResync());
     KC_PERF(S_NET_EVENTS, tickRoster(gw));
 
     // Coordinated load (protocol 32): the JOIN never loads locally while a

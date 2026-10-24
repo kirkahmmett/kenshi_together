@@ -54,6 +54,7 @@ $script:CoopDiagEnvKeys = @(
     # --- combat-drive bands (Config.cpp; Replicator::setCombatTuning) ---
     'KENSHICOOP_COMBAT_CONVERGE_MS'
     'KENSHICOOP_LOOK_TEST'
+    'KENSHICOOP_RESYNC_TEST'
     'KENSHICOOP_COMBAT_SNAP_DIST'
     'KENSHICOOP_COMBAT_SLIDE_MAX'
     # --- log-only diagnostic traces (read outside Config; never gate behavior) ---
