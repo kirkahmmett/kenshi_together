@@ -587,6 +587,9 @@ public:
     // the protocol-27 build maps (keyKind=1); the receiver resolves back in
     // ingestInv. Layered on invSync (publishInventories is the carrier).
     void setStoreSync(bool v) { storeSync_ = v; }
+    // Trader sync (protocol 63, HOST only): author the inventories of traders
+    // near any player, so every client sees one stock.
+    void setTraderSync(bool v) { traderSync_ = v; }
 
     // Connect-edge resync (protocol 30, no wire change): called from the
     // game-thread connect drain (processNetEvents) when a peer appears (host
@@ -1440,6 +1443,9 @@ private:
     bool           storeSync_;
     unsigned long  contCensusMs_;
     std::set<Key>  censusContainers_;
+    bool           traderSync_;
+    unsigned long  traderCensusMs_;
+    std::set<Key>  traderContainers_;
 
     // Phase W1 world-item state.
     // HOST: worldTrack_ maps a ground item's LOCAL engine hand (Key) to its assigned

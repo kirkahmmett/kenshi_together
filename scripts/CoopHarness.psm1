@@ -56,6 +56,7 @@ $script:CoopDiagEnvKeys = @(
     'KENSHICOOP_LOOK_TEST'
     'KENSHICOOP_RESYNC_TEST'
     'KENSHICOOP_TRADE_TEST'
+    'KENSHICOOP_TRADER_SYNC'
     'KENSHICOOP_COMBAT_SNAP_DIST'
     'KENSHICOOP_COMBAT_SLIDE_MAX'
     # --- log-only diagnostic traces (read outside Config; never gate behavior) ---

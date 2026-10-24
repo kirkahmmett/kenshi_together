@@ -433,6 +433,64 @@ static void fillDoorRead(DoorStuff* d, DoorRead* r) {
     }
 }
 
+// One center per player squad - ALL of them. interestCenters stops at two squads,
+// which suits the NPC stream's budget but not the doors / storage / traders
+// scans: with 3-4 players the third and fourth had nothing near them scanned.
+static unsigned int squadCenters(GameWorld* gw, Ogre::Vector3* centers, unsigned int maxC) {
+    unsigned int nc = 0;
+    unsigned int seenC[8][2];
+    if (maxC > 8) maxC = 8;
+    PlayerInterface* pl = gw->player;
+    unsigned int total0 = pl ? (unsigned int)pl->playerCharacters.size() : 0;
+    for (unsigned int i = 0; i < total0 && nc < maxC; ++i) {
+        Character* m = pl->playerCharacters[i];
+        if (!m) continue;
+        unsigned int h[5];
+        if (!readObjectHand(static_cast<RootObject*>(m), h)) continue;
+        bool seen = false;
+        for (unsigned int k = 0; k < nc; ++k)
+            if (seenC[k][0] == h[1] && seenC[k][1] == h[2]) { seen = true; break; }
+        if (seen) continue;
+        seenC[nc][0] = h[1]; seenC[nc][1] = h[2];
+        centers[nc] = m->getPosition();
+        ++nc;
+    }
+    return nc;
+}
+
+typedef bool (__fastcall* IsTraderFn)(const Character* self);
+static IsTraderFn g_isTraderFn = 0;
+unsigned int enumTradersNear(GameWorld* gw, float radius, unsigned int out[][5], unsigned int maxOut) {
+    if (!gw || !out || maxOut == 0 || !g_getObjsFn) return 0;
+    if (!g_isTraderFn) g_isTraderFn = (IsTraderFn)KenshiLib::GetRealAddress(&Character::isATrader);
+    if (!g_isTraderFn) return 0;
+    unsigned int n = 0;
+    __try {
+        Ogre::Vector3 centers[8];
+        unsigned int nc = squadCenters(gw, centers, 8);
+        for (unsigned int ci = 0; ci < nc; ++ci) {
+            g_npcQuery.clear();
+            g_getObjsFn(gw, &g_npcQuery, &centers[ci], radius, CHARACTER, 256, 0);
+            unsigned int total = g_npcQuery.size();
+            for (unsigned int i = 0; i < total && n < maxOut; ++i) {
+                RootObject* o = g_npcQuery[i];
+                if (!o) continue;
+                Character* c = static_cast<Character*>(o);
+                if (!g_isTraderFn(c)) continue;
+                unsigned int h[5];
+                if (!readObjectHand(o, h)) continue;
+                bool dup = false;
+                for (unsigned int k = 0; k < n && !dup; ++k)
+                    dup = out[k][1] == h[1] && out[k][3] == h[3] && out[k][4] == h[4];
+                if (dup) continue;
+                memcpy(out[n], h, sizeof(h));
+                ++n;
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return n; }
+    return n;
+}
+
 unsigned int enumDoorsNear(GameWorld* gw, float radius, DoorRead* out, unsigned int maxOut) {
     if (!gw || !out || maxOut == 0 || !g_getObjsFn || !g_doorIsOpenFn) return 0;
     unsigned int n = 0;
@@ -441,25 +499,8 @@ unsigned int enumDoorsNear(GameWorld* gw, float radius, DoorRead* out, unsigned 
         // two squads - right for the NPC stream's budget, wrong here: with 3-4
         // players the third and fourth never had their doors scanned, so a door
         // they opened reached nobody.
-        const unsigned int MAX_CENTERS = 8;
-        Ogre::Vector3 centers[MAX_CENTERS];
-        unsigned int nc = 0;
-        unsigned int seenC[MAX_CENTERS][2];
-        PlayerInterface* pl = gw->player;
-        unsigned int total0 = pl ? (unsigned int)pl->playerCharacters.size() : 0;
-        for (unsigned int i = 0; i < total0 && nc < MAX_CENTERS; ++i) {
-            Character* m = pl->playerCharacters[i];
-            if (!m) continue;
-            unsigned int h[5];
-            if (!readObjectHand(static_cast<RootObject*>(m), h)) continue;
-            bool seen = false;
-            for (unsigned int k = 0; k < nc; ++k)
-                if (seenC[k][0] == h[1] && seenC[k][1] == h[2]) { seen = true; break; }
-            if (seen) continue;
-            seenC[nc][0] = h[1]; seenC[nc][1] = h[2];
-            centers[nc] = m->getPosition();
-            ++nc;
-        }
+        Ogre::Vector3 centers[8];
+        unsigned int nc = squadCenters(gw, centers, 8);
         if (nc == 0) return 0;
         for (unsigned int ci = 0; ci < nc; ++ci) {
             g_npcQuery.clear();
@@ -1584,8 +1625,8 @@ unsigned int enumContainersNear(GameWorld* gw, float radius, ContRead* out,
     if (!gw || !out || maxOut == 0 || !g_getObjsFn) return 0;
     unsigned int n = 0;
     __try {
-        Ogre::Vector3 centers[4];
-        unsigned int nc = interestCenters(gw, centers);
+        Ogre::Vector3 centers[8];
+        unsigned int nc = squadCenters(gw, centers, 8); // every player, not the first two
         if (nc == 0) return 0;
         for (unsigned int ci = 0; ci < nc; ++ci) {
             g_npcQuery.clear();

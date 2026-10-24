@@ -788,6 +788,21 @@ struct TakeRequestEdge {
     char         name[48];
 };
 unsigned int drainTakeRequests(TakeRequestEdge* out, unsigned int maxOut);
+// Trader sync (v63). Every completed purchase (buyItem) as an edge; the plugin
+// keeps the ones from a trader to our own character.
+struct ShopBuyEdge {
+    unsigned int seller[5];
+    unsigned int buyer[5];
+    unsigned int typeCat;
+    int          qty;
+    char         sid[48];
+};
+unsigned int drainShopBuys(ShopBuyEdge* out, unsigned int maxOut);
+// Traders (Character::isATrader) within `radius` of any player squad.
+unsigned int enumTradersNear(GameWorld* gw, float radius, unsigned int out[][5], unsigned int maxOut);
+// Take `qty` units of (sid, typeCat) out of the inventory at `hand` (loose first,
+// then worn), destroying them. Returns the units removed.
+int removeItemsBySid(const unsigned int hand[5], const char* sid, unsigned int typeCat, int qty);
 // The first item an inventory owner holds (test lever + diagnostics).
 bool firstItemOf(const unsigned int hand[5], char* sid, unsigned int sidLen,
                  unsigned int* typeCat, char* name, unsigned int nameLen);

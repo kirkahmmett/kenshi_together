@@ -729,6 +729,12 @@ public:
         InboundLoadNack ln; ln.ownerId = ownerId; ln.pkt = pkt;
         EnterCriticalSection(&cs_); loadNack_.push_back(ln); LeaveCriticalSection(&cs_);
     }
+    void pushShopTake(const ShopTakePacket& p) {
+        EnterCriticalSection(&cs_); shopTake_.push_back(p); LeaveCriticalSection(&cs_);
+    }
+    void drainShopTakes(std::deque<ShopTakePacket>& out) {
+        EnterCriticalSection(&cs_); out.swap(shopTake_); LeaveCriticalSection(&cs_);
+    }
     void pushTradeReq(const TradeReqPacket& p) {
         EnterCriticalSection(&cs_); tradeReq_.push_back(p); LeaveCriticalSection(&cs_);
     }
@@ -1028,6 +1034,7 @@ private:
     SessionQ<u32>                  resyncReq_; // v61: join ids asking for a resync
     SessionQ<TradeReqPacket>       tradeReq_;  // v62: consent trade
     SessionQ<TradeRespPacket>      tradeResp_;
+    SessionQ<ShopTakePacket>       shopTake_;   // v63: joins' purchases (host)
     // SESSION-PRESERVING: the host's join permissions (protocol 56) are a
     // session setting, not world state - a world swap must not drop them.
     SessionQ<InboundPerms>         perms_;

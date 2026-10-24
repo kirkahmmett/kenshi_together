@@ -207,6 +207,7 @@ public:
     // the host, which relays to the other joins.
     void queueTradeReq(const TradeReqPacket& pkt);
     void queueTradeResp(const TradeRespPacket& pkt);
+    void queueShopTake(const ShopTakePacket& pkt); // join -> host (v63)
     void queueCharLook(const CharLookHeader& hdr, const std::string& name,
                        const std::string& race, const std::vector<u8>& data);
 
@@ -376,6 +377,7 @@ private:
     std::vector<ResyncReqPacket>  outResyncReq_;
     std::vector<TradeReqPacket>   outTradeReq_;
     std::vector<TradeRespPacket>  outTradeResp_;
+    std::vector<ShopTakePacket>   outShopTake_;
 
     HANDLE        thread_;
     volatile LONG running_;

@@ -1393,6 +1393,46 @@ void answerTrade(size_t i, bool accept, bool expired) {
 
 void onTradeAnswer(int index, bool accept) { answerTrade((size_t)index, accept, false); }
 
+// ---- Trader sync (protocol 63) -------------------------------------------------
+// A join's purchase from a trader is reported to the host, which takes the same
+// units out of its copy of the trader (the stock it publishes to everyone).
+void tickShop() {
+    coop::engine::ShopBuyEdge buys[8];
+    unsigned int nb = coop::engine::drainShopBuys(buys, 8);
+    if (!g_cfg.isHost && g_peerPresent) {
+        for (unsigned int i = 0; i < nb; ++i) {
+            // From a trader (not a squad member) to one of our own characters.
+            if (g_repl.ownerClassForHand(buys[i].seller) != 0) continue;
+            if (g_repl.ownerClassForHand(buys[i].buyer) != 1) continue;
+            coop::ShopTakePacket p;
+            memset(&p, 0, sizeof(p));
+            p.type = (coop::u8)coop::PKT_SHOP_TAKE;
+            p.ownerId = g_net.localId();
+            memcpy(p.trader, buys[i].seller, sizeof(p.trader));
+            p.typeCat = buys[i].typeCat;
+            p.qty = buys[i].qty;
+            memcpy(p.sid, buys[i].sid, sizeof(p.sid));
+            p.sid[sizeof(p.sid) - 1] = '\0';
+            g_net.queueShopTake(p);
+            char b[160];
+            _snprintf(b, sizeof(b) - 1, "[shop] told the host: bought '%s' x%d from trader %u,%u",
+                      p.sid, (int)p.qty, p.trader[3], p.trader[4]);
+            b[sizeof(b) - 1] = '\0'; coopLog(b);
+        }
+    }
+    std::deque<coop::ShopTakePacket> takes;
+    g_inbound.drainShopTakes(takes);
+    if (!g_cfg.isHost) return;
+    for (std::deque<coop::ShopTakePacket>::iterator it = takes.begin(); it != takes.end(); ++it) {
+        it->sid[sizeof(it->sid) - 1] = '\0';
+        int removed = coop::engine::removeItemsBySid(it->trader, it->sid, it->typeCat, it->qty);
+        char b[176];
+        _snprintf(b, sizeof(b) - 1, "[shop] %s bought '%s' x%d from trader %u,%u - removed %d from its stock",
+                  playerName(it->ownerId).c_str(), it->sid, (int)it->qty, it->trader[3], it->trader[4], removed);
+        b[sizeof(b) - 1] = '\0'; coopLog(b);
+    }
+}
+
 void tickTrade(GameWorld* gw) {
     // Our refused takes -> requests.
     coop::engine::TakeRequestEdge edges[8];
@@ -3086,6 +3126,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     KC_PERF(S_NET_EVENTS, tickLook(gw));
     KC_PERF(S_NET_EVENTS, tickResync());
     KC_PERF(S_NET_EVENTS, tickTrade(gw));
+    KC_PERF(S_NET_EVENTS, tickShop());
     KC_PERF(S_NET_EVENTS, tickRoster(gw));
 
     // Coordinated load (protocol 32): the JOIN never loads locally while a
@@ -3713,6 +3754,14 @@ void installEngineDetours() {
     // census-author (host-authoritative world containers). Layered on invSync
     // (publishInventories is the carrier and is gated on it below).
     g_repl.setStoreSync(g_cfg.storeSync && g_cfg.isHost);
+    // v63 trader stock authority: OFF by default until a field session shows
+    // where shop stock lives (the trade UI's ShopTrader inventory is lazy and
+    // runtime-keyed; the trader character's is save-stable). Authoring the wrong
+    // container could empty a join's shop. KENSHICOOP_TRADER_SYNC=1 turns it on.
+    {
+        const char* ts = getenv("KENSHICOOP_TRADER_SYNC");
+        g_repl.setTraderSync(g_cfg.isHost && ts && ts[0] == '1');
+    }
     if (g_cfg.recruitSync) {
         if (coop::engine::installRecruitHook())
             coopLog("[recruit] recruit detour installed; recruitment sync ON");

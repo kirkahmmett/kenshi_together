@@ -25,7 +25,7 @@ typedef double         f64;
 // this header stays a definition file. When you bump PROTOCOL_VERSION, add the
 // matching entry at the bottom of that doc. The version is checked at handshake
 // and a mismatch is rejected (no back-compat).
-const u16 PROTOCOL_VERSION = 62;
+const u16 PROTOCOL_VERSION = 63;
 
 // Packet type tags (first byte of every packet).
 enum PacketType {
@@ -84,7 +84,8 @@ enum PacketType {
     PKT_CHAR_LOOK        = 53,// RELIABLE character editor offer / result (v60); CharLookHeader + name + race + appearance
     PKT_RESYNC_REQ       = 54,// RELIABLE a join asks the host to resync everyone (v61); ResyncReqPacket
     PKT_TRADE_REQ        = 55,// RELIABLE "may I have this item?" to its owner (v62); TradeReqPacket
-    PKT_TRADE_RESP       = 56 // RELIABLE the owner's answer (v62); TradeRespPacket
+    PKT_TRADE_RESP       = 56,// RELIABLE the owner's answer (v62); TradeRespPacket
+    PKT_SHOP_TAKE        = 57 // RELIABLE a join bought from a trader (v63); ShopTakePacket
 };
 
 // One-shot transition events carried on the RELIABLE channel. Continuous state
@@ -1671,6 +1672,21 @@ struct TradeReqPacket {
     char sid[48];   // the item's GameData stringID
     char name[48];  // display name
 };
+// Protocol 63 (trader sync). The HOST authors every trader's stock near the
+// players (their inventories ride PKT_INV_SNAPSHOT like any authored container),
+// so one restock and one stock count hold for everyone. A join's purchase
+// happens locally (item + money, the money via the wallet pool) and is then
+// reported here so the host takes the same units out of its copy of the
+// trader - the next snapshot carries the lower stock to every join.
+struct ShopTakePacket {
+    u8   type;      // = PKT_SHOP_TAKE
+    u32  ownerId;   // the buying join
+    u32  trader[5]; // the selling trader (readObjectHand layout)
+    u32  typeCat;   // the item's GameData type
+    i32  qty;       // units bought
+    char sid[48];   // the item's GameData stringID
+};
+
 struct TradeRespPacket {
     u8  type;       // = PKT_TRADE_RESP
     u32 ownerId;    // the answering owner

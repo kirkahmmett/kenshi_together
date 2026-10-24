@@ -1303,6 +1303,22 @@ bool firstItemOf(const unsigned int hand[5], char* sid, unsigned int sidLen,
     return false;
 }
 
+int removeItemsBySid(const unsigned int hand[5], const char* sid, unsigned int typeCat, int qty) {
+    if (!hand || !sid || !sid[0] || qty <= 0) return 0;
+    RootObject* ro = resolveObjectByHand(hand);
+    Inventory* inv = ro ? invOf(ro) : 0;
+    if (!inv) return 0;
+    InvItemEntry cur[64];
+    Item* items[64];
+    unsigned int n = readInvItems(inv, cur, items, 64);
+    int removed = removeByKey(inv, items, cur, n, sid, typeCat, qty, 0);
+    if (removed < qty) {
+        n = readInvItems(inv, cur, items, 64); // the loose pass destroyed stacks
+        removed += removeByKey(inv, items, cur, n, sid, typeCat, qty - removed, 1);
+    }
+    return removed;
+}
+
 static int g_moveFail = 0; // why the last moveItemBetweenContainers moved nothing
 int lastMoveFailReason() { return g_moveFail; }
 

@@ -313,6 +313,7 @@ void NetLink::queueLoadReady(const LoadReadyPacket& pkt) { pushLocked(outCs_, ou
 void NetLink::queueResyncReq(const ResyncReqPacket& pkt) { pushLocked(outCs_, outResyncReq_, pkt); }
 void NetLink::queueTradeReq(const TradeReqPacket& pkt) { pushLocked(outCs_, outTradeReq_, pkt); }
 void NetLink::queueTradeResp(const TradeRespPacket& pkt) { pushLocked(outCs_, outTradeResp_, pkt); }
+void NetLink::queueShopTake(const ShopTakePacket& pkt) { pushLocked(outCs_, outShopTake_, pkt); }
 void NetLink::queueCharLook(const CharLookHeader& hdr, const std::string& name,
                             const std::string& race, const std::vector<u8>& data) {
     std::vector<u8> pk(sizeof(CharLookHeader));
@@ -1111,6 +1112,12 @@ void NetLink::threadLoop() {
                             && inbound_) {
                             inbound_->pushLoadReq(lr.ownerId, lr);
                         }
+                    } else if (type == PKT_SHOP_TAKE) {
+                        // v63: a join bought from a trader (host only).
+                        ShopTakePacket sp;
+                        if (isHost_ && inbound_ &&
+                            readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &sp))
+                            inbound_->pushShopTake(sp);
                     } else if (type == PKT_TRADE_REQ) {
                         // v62 consent trade (relayed to the other joins by the host).
                         TradeReqPacket tr;
@@ -2104,12 +2111,20 @@ void NetLink::threadLoop() {
         std::vector<ResyncReqPacket> resyncReqs;
         std::vector<TradeReqPacket>  tradeReqs;
         std::vector<TradeRespPacket> tradeResps;
+        std::vector<ShopTakePacket>  shopTakes;
         EnterCriticalSection(&outCs_);
+        shopTakes.swap(outShopTake_);
         charLooks.swap(outCharLook_);
         resyncReqs.swap(outResyncReq_);
         tradeReqs.swap(outTradeReq_);
         tradeResps.swap(outTradeResp_);
         LeaveCriticalSection(&outCs_);
+        for (size_t i = 0; i < shopTakes.size(); ++i) {
+            if (isHost_ || !serverPeer_ || serverPeer_->state != ENET_PEER_STATE_CONNECTED) continue;
+            enet_peer_send(serverPeer_, CH_RELIABLE,
+                           enet_packet_create(&shopTakes[i], sizeof(ShopTakePacket),
+                                              ENET_PACKET_FLAG_RELIABLE));
+        }
         for (size_t i = 0; i < tradeReqs.size() + tradeResps.size(); ++i) {
             bool isReq = i < tradeReqs.size();
             const void* data = isReq ? (const void*)&tradeReqs[i]

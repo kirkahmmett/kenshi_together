@@ -50,6 +50,22 @@ void Replicator::publishInventories(GameWorld* gw, NetLink& net, u32 ownerId) {
         }
         owned.insert(censusContainers_.begin(), censusContainers_.end());
     }
+    // Protocol 63 (traderSync, HOST only): traders near any player are authored
+    // here too, so a restock or a sale reaches every join as one stock.
+    if (traderSync_) {
+        unsigned long tnow = nowMs();
+        if (traderCensusMs_ == 0 || (tnow - traderCensusMs_) >= 1000) {
+            traderCensusMs_ = tnow;
+            unsigned int th[16][5];
+            unsigned int nt = engine::enumTradersNear(gw, 150.0f, th, 16);
+            traderContainers_.clear();
+            for (unsigned int i = 0; i < nt; ++i) {
+                Key k; k.t = th[i][0]; k.c = th[i][1]; k.cs = th[i][2]; k.i = th[i][3]; k.s = th[i][4];
+                traderContainers_.insert(k);
+            }
+        }
+        owned.insert(traderContainers_.begin(), traderContainers_.end());
+    }
     if (owned.empty()) return;
     // Periodic safety resend (late join / a container returning to interest). The channel
     // is RELIABLE, so this is not loss recovery - it is a cheap re-assert. With

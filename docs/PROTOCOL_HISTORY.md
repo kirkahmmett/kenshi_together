@@ -109,3 +109,19 @@ build** after a bump.
   player's items cannot be requested.
 - Test lever `KENSHICOOP_TRADE_TEST=N`: a join asks for an item N s into the
   game; the host accepts every request after 3 s.
+
+## 63 - trader sync (groundwork)
+
+- `PKT_SHOP_TAKE` (57) / `ShopTakePacket` (81 bytes), join -> host: a join's
+  purchase (`Inventory::buyItem`, seller not a squad member, buyer ours) is
+  reported; the host removes the same units from its copy of the seller, when
+  it holds them. The item and the money already ride the inventory and wallet
+  channels.
+- Host trader-stock authority (traders near any player become authored
+  containers) is built but OFF by default (`KENSHICOOP_TRADER_SYNC=1`): shop
+  stock may live in the lazy, runtime-keyed ShopTrader inventory rather than the
+  trader character's, and authoring the wrong one could empty a join's shop.
+  `[shop] BUY-LOCAL` now logs the seller's hand type and trader flag to settle it
+  from a field session.
+- Not on the wire: the storage-container census (protocol 34) scans around
+  every player squad, not just the first two (3-4 player sessions).

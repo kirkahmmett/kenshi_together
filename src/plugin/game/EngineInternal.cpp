@@ -773,6 +773,14 @@ static bool handIsBuilding(const unsigned int h[5]) {
 }
 
 BuyItemFn g_buyItemOrig = 0;
+// Trader sync (v63): completed purchases for the plugin.
+static std::vector<ShopBuyEdge> g_shopBuys;
+unsigned int drainShopBuys(ShopBuyEdge* out, unsigned int maxOut) {
+    unsigned int n = 0;
+    for (; n < g_shopBuys.size() && n < maxOut; ++n) out[n] = g_shopBuys[n];
+    g_shopBuys.clear();
+    return n;
+}
 static bool offMainThread(); // below, with the inventory detours
 Item* __fastcall buyItem_hook(Inventory* self, Item* itemToBuy, RootObject* sendingTo) {
     if (offMainThread()) return g_buyItemOrig(self, itemToBuy, sendingTo);
@@ -797,10 +805,33 @@ Item* __fastcall buyItem_hook(Inventory* self, Item* itemToBuy, RootObject* send
         }
         unsigned int bh[5] = { 0, 0, 0, 0, 0 };
         if (sendingTo) readObjectHand(sendingTo, bh);
-        char b[224];
+        if (got && sid[0] && g_shopBuys.size() < 16) {
+            ShopBuyEdge e;
+            memset(&e, 0, sizeof(e));
+            memcpy(e.seller, sh, sizeof(e.seller));
+            memcpy(e.buyer, bh, sizeof(e.buyer));
+            memcpy(e.sid, sid, sizeof(e.sid));
+            GameData* gd2 = got->getGameData();
+            e.typeCat = gd2 ? (unsigned int)gd2->type : 0;
+            e.qty = got->quantity > 0 ? got->quantity : 1;
+            g_shopBuys.push_back(e);
+        }
+        // Field evidence for the trader-stock design: what KIND of object sold
+        // (hand type: 1 character, other = a shop object) and whether it is a
+        // trader character.
+        int sellerTrader = -1;
+        if (seller && sh[0] == (unsigned int)CHARACTER) {
+            typedef bool (__fastcall* IsTrFn)(const Character*);
+            static IsTrFn s_isTr = 0;
+            if (!s_isTr) s_isTr = (IsTrFn)KenshiLib::GetRealAddress(&Character::isATrader);
+            if (s_isTr) __try { sellerTrader = s_isTr(static_cast<Character*>(seller)) ? 1 : 0; }
+                        __except (EXCEPTION_EXECUTE_HANDLER) { sellerTrader = -2; }
+        }
+        char b[256];
         _snprintf(b, sizeof(b) - 1,
-                  "[shop] BUY-LOCAL ok=%d sid='%s' seller=%u,%u money=%d buyer=%u,%u",
-                  got ? 1 : 0, sid, sh[3], sh[4], sellerMoney, bh[3], bh[4]);
+                  "[shop] BUY-LOCAL ok=%d sid='%s' seller=%u:%u,%u,%u,%u trader=%d money=%d buyer=%u,%u",
+                  got ? 1 : 0, sid, sh[0], sh[1], sh[2], sh[3], sh[4], sellerTrader,
+                  sellerMoney, bh[3], bh[4]);
         b[sizeof(b) - 1] = '\0'; coop::logLine(b);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     return got;
