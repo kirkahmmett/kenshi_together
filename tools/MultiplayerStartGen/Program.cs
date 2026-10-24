@@ -171,7 +171,7 @@ var wandererStart = MakeStart(3, "Multiplayer (Wanderer x2)",
 // stat floor. Keep it in sync with WPX2_MARKER_SID in src/plugin/Plugin.cpp.
 var plusWanderer = CloneWanderer(4, "Wanderer 2");
 var plusSquad2 = CloneSquad(5, "startoff- Multiplayer+ squad 2 (co-op)", 4);
-var plusStart = MakeStart(6, "Multiplayer+ (Wanderer x2)",
+var plusStart = MakeStart(6, "Multiplayer Wanderer - Rich (500k cats, stats 50)",
     "Two seasoned wanderers setting out together with a small fortune behind them.  The same start " +
     "as Multiplayer (Wanderer x2) - each wanderer in their own squad, so the host controls squad 1 " +
     "and the joining player controls squad 2 - but without the early grind.  The 500,000 cats are " +
