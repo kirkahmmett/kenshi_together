@@ -95,3 +95,17 @@ build** after a bump.
   dumps, mods.cfg and a short report.txt into a Desktop folder.
 - Test lever `KENSHICOOP_RESYNC_TEST=N`: a join saves a report and asks for a
   resync N s into the game.
+
+## 62 - consent trade
+
+- `PKT_TRADE_REQ` (55) / `TradeReqPacket` (157 bytes) and `PKT_TRADE_RESP` (56)
+  / `TradeRespPacket` (18 bytes), relayed by the host; each client acts only on
+  rows whose `target` is its own id. A take the protocol-58 rule refuses (drag
+  or the trade window's right-click) becomes a request to the item's owner, who
+  accepts or declines in the panel ("Give: X wants Y" / "Decline"). On accept
+  the OWNER moves the item (`moveItemBetweenContainers`); the existing
+  protocol-37 transfer carries it to the asker's client. `moved` = -2 means the
+  asker's character had no room. Requests expire after 120 s; an away
+  player's items cannot be requested.
+- Test lever `KENSHICOOP_TRADE_TEST=N`: a join asks for an item N s into the
+  game; the host accepts every request after 3 s.

@@ -25,7 +25,7 @@ typedef double         f64;
 // this header stays a definition file. When you bump PROTOCOL_VERSION, add the
 // matching entry at the bottom of that doc. The version is checked at handshake
 // and a mismatch is rejected (no back-compat).
-const u16 PROTOCOL_VERSION = 61;
+const u16 PROTOCOL_VERSION = 62;
 
 // Packet type tags (first byte of every packet).
 enum PacketType {
@@ -82,7 +82,9 @@ enum PacketType {
     PKT_ROSTER           = 51,// RELIABLE one player's display name (host -> joins, protocol 57); RosterPacket
     PKT_LOAD_READY       = 52,// RELIABLE a join finished loading a coordinated load (join -> host, v59); LoadReadyPacket
     PKT_CHAR_LOOK        = 53,// RELIABLE character editor offer / result (v60); CharLookHeader + name + race + appearance
-    PKT_RESYNC_REQ       = 54 // RELIABLE a join asks the host to resync everyone (v61); ResyncReqPacket
+    PKT_RESYNC_REQ       = 54,// RELIABLE a join asks the host to resync everyone (v61); ResyncReqPacket
+    PKT_TRADE_REQ        = 55,// RELIABLE "may I have this item?" to its owner (v62); TradeReqPacket
+    PKT_TRADE_RESP       = 56 // RELIABLE the owner's answer (v62); TradeRespPacket
 };
 
 // One-shot transition events carried on the RELIABLE channel. Continuous state
@@ -1649,6 +1651,33 @@ struct LoadReadyPacket {
 struct ResyncReqPacket {
     u8  type;     // = PKT_RESYNC_REQ
     u32 ownerId;  // the join asking
+};
+
+// Protocol 62 (consent trade). Taking out of another player's character is
+// refused (protocol 58); the refused take now becomes a REQUEST to that
+// character's owner, who accepts or declines in the panel. On accept the
+// OWNER's client moves the item (owner-authoritative inventory), and the
+// answer goes back to the asker. Both relay through the host; each client acts
+// only on rows whose `target` is its own player id.
+struct TradeReqPacket {
+    u8   type;      // = PKT_TRADE_REQ
+    u32  ownerId;   // the asking player
+    u32  target;    // the item owner's player id (0 = host)
+    u32  reqId;     // per-asker monotonic
+    u32  src[5];    // the owner's character holding the item (readObjectHand layout)
+    u32  dst[5];    // the asker's character to receive it
+    u32  typeCat;   // the item's GameData type (itemType)
+    i32  qty;       // how many
+    char sid[48];   // the item's GameData stringID
+    char name[48];  // display name
+};
+struct TradeRespPacket {
+    u8  type;       // = PKT_TRADE_RESP
+    u32 ownerId;    // the answering owner
+    u32 target;     // the asker
+    u32 reqId;      // the request answered
+    u8  accepted;   // 1 accepted, 0 declined (or expired)
+    i32 moved;      // items actually moved (0 when it was no longer there)
 };
 
 const u8  CHAR_LOOK_OFFER    = 0;

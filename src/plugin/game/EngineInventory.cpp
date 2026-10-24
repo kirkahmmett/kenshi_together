@@ -1276,10 +1276,41 @@ int addItemsToContainerBySid(GameWorld* gw, const unsigned int cHand[5],
     return ok ? qty : 0;
 }
 
+bool firstItemOf(const unsigned int hand[5], char* sid, unsigned int sidLen,
+                 unsigned int* typeCat, char* name, unsigned int nameLen) {
+    if (!hand || !sid || !sidLen) return false;
+    RootObject* ro = resolveObjectByHand(hand);
+    Inventory* inv = ro ? invOf(ro) : 0;
+    if (!inv) return false;
+    InvItemEntry cur[64];
+    Item* items[64];
+    unsigned int n = readInvItems(inv, cur, items, 64);
+    // Loose items first, then worn ones (moveItemBetweenContainers takes both).
+    for (unsigned int k = 0; k < 2 * n; ++k) {
+        unsigned int i = k % n;
+        if (!items[i] || (int)cur[i].equipped != (k < n ? 0 : 1)) continue;
+        strncpy(sid, cur[i].stringID, sidLen - 1); sid[sidLen - 1] = 0;
+        if (typeCat) *typeCat = cur[i].itemType;
+        if (name && nameLen) {
+            name[0] = 0;
+            __try {
+                GameData* gd = items[i]->getGameData();
+                if (gd) { strncpy(name, gd->name.c_str(), nameLen - 1); name[nameLen - 1] = 0; }
+            } __except (EXCEPTION_EXECUTE_HANDLER) { name[0] = 0; }
+        }
+        return true;
+    }
+    return false;
+}
+
+static int g_moveFail = 0; // why the last moveItemBetweenContainers moved nothing
+int lastMoveFailReason() { return g_moveFail; }
+
 int moveItemBetweenContainers(GameWorld* gw, const unsigned int srcHand[5],
                               const unsigned int dstHand[5],
                               const char* sid, unsigned int typeCat, int qty,
                               bool suspendVeto) {
+    g_moveFail = 1; // not found, until a matching stack is seen
     if (!gw || !sid || !sid[0] || qty <= 0) return 0;
     RootObject* srcRo = resolveObjectByHand(srcHand);
     RootObject* dstRo = resolveObjectByHand(dstHand);
@@ -1320,6 +1351,7 @@ int moveItemBetweenContainers(GameWorld* gw, const unsigned int srcHand[5],
                 if (!taken) continue;
                 if (!dst->tryAddItem(taken, 1)) {             // virtual: real-object relocation
                     src->tryAddItem(taken, 1);                // destination refused - put it back
+                    if (moved == 0) g_moveFail = 2;           // no room
                     g_invVetoSuspend = vetoSav;
                     return moved;
                 }

@@ -733,6 +733,39 @@ static void notePermRefusal(int kind, const char* what) {
     b[sizeof(b) - 1] = '\0';
     coop::logLine(b);
 }
+// ---- Consent trade (protocol 62) ---------------------------------------------
+// Every take the rule refuses is recorded as a request the plugin forwards to
+// the item's owner. A drag can reach both add detours for one item, so an
+// identical request within 1 s is recorded once.
+static std::vector<TakeRequestEdge> g_takeReqs;
+static void noteTakeRequest(const unsigned int src[5], const unsigned int dst[5],
+                            Item* item, int qty) {
+    TakeRequestEdge e;
+    memset(&e, 0, sizeof(e));
+    memcpy(e.src, src, sizeof(e.src));
+    memcpy(e.dst, dst, sizeof(e.dst));
+    e.qty = qty > 0 ? qty : 1;
+    __try {
+        GameData* gd = item ? item->getGameData() : 0;
+        if (!gd) return;
+        strncpy(e.sid, gd->stringID.c_str(), sizeof(e.sid) - 1);
+        strncpy(e.name, gd->name.c_str(), sizeof(e.name) - 1);
+        e.typeCat = (unsigned int)gd->type;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return; }
+    static DWORD s_lastTick = 0;
+    static TakeRequestEdge s_last;
+    DWORD now = GetTickCount();
+    if (now - s_lastTick < 1000 && memcmp(&s_last, &e, sizeof(e)) == 0) return;
+    s_last = e; s_lastTick = now;
+    if (g_takeReqs.size() < 16) g_takeReqs.push_back(e);
+}
+unsigned int drainTakeRequests(TakeRequestEdge* out, unsigned int maxOut) {
+    unsigned int n = 0;
+    for (; n < g_takeReqs.size() && n < maxOut; ++n) out[n] = g_takeReqs[n];
+    g_takeReqs.clear();
+    return n;
+}
+
 // A building's inventory (storage) as opposed to a character's: hand type
 // BUILDING (itemType 0) with a non-empty hand.
 static bool handIsBuilding(const unsigned int h[5]) {
@@ -992,7 +1025,10 @@ bool __fastcall tryAddItem_hook(Inventory* self, Item* item, int quantity) {
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
         if (decision == 2) notePermRefusal(2, "storage container use");
-        if (decision == 3) notePermRefusal(4, "taking items from another player's character");
+        if (decision == 3) {
+            notePermRefusal(4, "taking items from another player's character");
+            noteTakeRequest(srcHand, dstHand, item, quantity);
+        }
         if ((g_blockXfer && decision == 1) || decision == 2 || decision == 3) {
             if (decision == 1) __try {
                 char sid[48]; sid[0] = '\0';
@@ -1049,9 +1085,9 @@ bool __fastcall addItem4_hook(Inventory* self, Item* item, int quantity,
         !self || !item || !g_pendRemInv || g_pendRemInv == self)
         return g_addItem4Orig(self, item, quantity, dropOnFail, destroyOnFail);
     bool refuse = false;
+    unsigned int dstHand[5] = { 0, 0, 0, 0, 0 };
+    unsigned int srcHand[5] = { 0, 0, 0, 0, 0 };
     __try {
-        unsigned int dstHand[5] = { 0, 0, 0, 0, 0 };
-        unsigned int srcHand[5] = { 0, 0, 0, 0, 0 };
         bool haveSrc = false;
         if (g_havePendRemOwner) { memcpy(srcHand, g_pendRemOwnerHand, sizeof(srcHand)); haveSrc = true; }
         if (!haveSrc) haveSrc = ownerHandOfInventory(g_pendRemInv, srcHand);
@@ -1062,6 +1098,7 @@ bool __fastcall addItem4_hook(Inventory* self, Item* item, int quantity,
     if (!refuse)
         return g_addItem4Orig(self, item, quantity, dropOnFail, destroyOnFail);
     notePermRefusal(4, "taking items from another player's character (trade window)");
+    noteTakeRequest(srcHand, dstHand, item, quantity);
     bool restored = false;
     Inventory* src = g_pendRemInv;
     bool sav = g_invVetoSuspend; g_invVetoSuspend = true;

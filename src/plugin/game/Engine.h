@@ -716,6 +716,8 @@ int addItemsToContainerBySid(GameWorld* gw, const unsigned int cHand[5],
 // suspended so it never refuses them. The xfer_block test passes false to drive
 // the engine primitives EXACTLY like a UI drag (subject to the veto), so it can
 // assert a cross-owner move is refused (returns 0, item conserved in src).
+// Why the last moveItemBetweenContainers moved nothing: 1 not found, 2 no room.
+int lastMoveFailReason();
 int moveItemBetweenContainers(GameWorld* gw, const unsigned int srcHand[5],
                               const unsigned int dstHand[5],
                               const char* sid, unsigned int typeCat, int qty,
@@ -776,6 +778,19 @@ void setTakeFromPlayers(bool allowed);
 // Control lock: while on, enforceOwnSelection (call once per tick) deselects any
 // selected squad member that belongs to another player. Returns how many.
 void setControlLock(bool on);
+// Consent trade (v62): a take the rule refused, as a request for its owner.
+struct TakeRequestEdge {
+    unsigned int src[5];   // the other player's character holding the item
+    unsigned int dst[5];   // our character that tried to take it
+    unsigned int typeCat;  // the item's GameData type
+    int          qty;
+    char         sid[48];
+    char         name[48];
+};
+unsigned int drainTakeRequests(TakeRequestEdge* out, unsigned int maxOut);
+// The first item an inventory owner holds (test lever + diagnostics).
+bool firstItemOf(const unsigned int hand[5], char* sid, unsigned int sidLen,
+                 unsigned int* typeCat, char* name, unsigned int nameLen);
 // Character editor (v60). openCharacterEditor opens Kenshi's own editor on the
 // character at `hand` (PlayerInterface::activateCharacterEditMode).
 // characterEditorOpen: 1 open, 0 closed, -1 unknown. exportCharacterLook writes

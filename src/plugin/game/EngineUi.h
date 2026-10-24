@@ -102,6 +102,11 @@ struct CoopPanelState {
     // "Save a problem report" (logs to a Desktop folder). Null = hidden.
     void               (*onResync)();
     void               (*onReport)();
+    // Consent trade (v62): requests waiting for OUR answer, as display lines;
+    // a press calls onTradeAnswer(index, accept). Null callback = hidden.
+    int                tradeCount;
+    const char*        tradeText[4];
+    void               (*onTradeAnswer)(int index, bool accept);
 };
 // The panel's role/transport selections at the moment Connect is hit. peerId is the
 // Steam ID pasted in-panel this session (0 if none), and overrides the config

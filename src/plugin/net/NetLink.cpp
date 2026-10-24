@@ -311,6 +311,8 @@ void NetLink::queueLoadReq(const LoadReqPacket& pkt) { pushLocked(outCs_, outLoa
 void NetLink::queueLoadNack(const LoadNackPacket& pkt) { pushLocked(outCs_, outLoadNack_, pkt); }
 void NetLink::queueLoadReady(const LoadReadyPacket& pkt) { pushLocked(outCs_, outLoadReady_, pkt); }
 void NetLink::queueResyncReq(const ResyncReqPacket& pkt) { pushLocked(outCs_, outResyncReq_, pkt); }
+void NetLink::queueTradeReq(const TradeReqPacket& pkt) { pushLocked(outCs_, outTradeReq_, pkt); }
+void NetLink::queueTradeResp(const TradeRespPacket& pkt) { pushLocked(outCs_, outTradeResp_, pkt); }
 void NetLink::queueCharLook(const CharLookHeader& hdr, const std::string& name,
                             const std::string& race, const std::vector<u8>& data) {
     std::vector<u8> pk(sizeof(CharLookHeader));
@@ -346,6 +348,7 @@ static bool relayToJoins(u8 type) {
         case PKT_BUILD_DOOR: case PKT_BUILD_REMOVE: case PKT_NPC_CENSUS:
         case PKT_INV_XFER: case PKT_WORLD_ITEM_CLAIM: case PKT_CELL_CLAIM:
         case PKT_INV_XFER_ACK: case PKT_DEED: case PKT_FIXTURE:
+        case PKT_TRADE_REQ: case PKT_TRADE_RESP:
             return true;
         default:
             return false;
@@ -1108,6 +1111,15 @@ void NetLink::threadLoop() {
                             && inbound_) {
                             inbound_->pushLoadReq(lr.ownerId, lr);
                         }
+                    } else if (type == PKT_TRADE_REQ) {
+                        // v62 consent trade (relayed to the other joins by the host).
+                        TradeReqPacket tr;
+                        if (inbound_ && readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &tr))
+                            inbound_->pushTradeReq(tr);
+                    } else if (type == PKT_TRADE_RESP) {
+                        TradeRespPacket tp;
+                        if (inbound_ && readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &tp))
+                            inbound_->pushTradeResp(tp);
                     } else if (type == PKT_RESYNC_REQ) {
                         // v61: a join asks the host to resync everyone.
                         ResyncReqPacket rr;
@@ -2090,10 +2102,28 @@ void NetLink::threadLoop() {
         LeaveCriticalSection(&outCs_);
         std::vector<std::vector<u8> > charLooks;
         std::vector<ResyncReqPacket> resyncReqs;
+        std::vector<TradeReqPacket>  tradeReqs;
+        std::vector<TradeRespPacket> tradeResps;
         EnterCriticalSection(&outCs_);
         charLooks.swap(outCharLook_);
         resyncReqs.swap(outResyncReq_);
+        tradeReqs.swap(outTradeReq_);
+        tradeResps.swap(outTradeResp_);
         LeaveCriticalSection(&outCs_);
+        for (size_t i = 0; i < tradeReqs.size() + tradeResps.size(); ++i) {
+            bool isReq = i < tradeReqs.size();
+            const void* data = isReq ? (const void*)&tradeReqs[i]
+                                     : (const void*)&tradeResps[i - tradeReqs.size()];
+            size_t len = isReq ? sizeof(TradeReqPacket) : sizeof(TradeRespPacket);
+            ENetPacket* out = enet_packet_create(data, len, ENET_PACKET_FLAG_RELIABLE);
+            if (isHost_) {
+                enet_host_broadcast(enetHost_, CH_RELIABLE, out);
+            } else if (serverPeer_ && serverPeer_->state == ENET_PEER_STATE_CONNECTED) {
+                enet_peer_send(serverPeer_, CH_RELIABLE, out);
+            } else {
+                enet_packet_destroy(out);
+            }
+        }
         for (size_t i = 0; i < resyncReqs.size(); ++i) {
             if (isHost_ || !serverPeer_ || serverPeer_->state != ENET_PEER_STATE_CONNECTED) continue;
             enet_peer_send(serverPeer_, CH_RELIABLE,

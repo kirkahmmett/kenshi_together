@@ -729,6 +729,18 @@ public:
         InboundLoadNack ln; ln.ownerId = ownerId; ln.pkt = pkt;
         EnterCriticalSection(&cs_); loadNack_.push_back(ln); LeaveCriticalSection(&cs_);
     }
+    void pushTradeReq(const TradeReqPacket& p) {
+        EnterCriticalSection(&cs_); tradeReq_.push_back(p); LeaveCriticalSection(&cs_);
+    }
+    void drainTradeReqs(std::deque<TradeReqPacket>& out) {
+        EnterCriticalSection(&cs_); out.swap(tradeReq_); LeaveCriticalSection(&cs_);
+    }
+    void pushTradeResp(const TradeRespPacket& p) {
+        EnterCriticalSection(&cs_); tradeResp_.push_back(p); LeaveCriticalSection(&cs_);
+    }
+    void drainTradeResps(std::deque<TradeRespPacket>& out) {
+        EnterCriticalSection(&cs_); out.swap(tradeResp_); LeaveCriticalSection(&cs_);
+    }
     void pushResyncReq(u32 senderId) {
         EnterCriticalSection(&cs_); resyncReq_.push_back(senderId); LeaveCriticalSection(&cs_);
     }
@@ -1014,6 +1026,8 @@ private:
     SessionQ<InboundModCheck>      modCheck_;
     SessionQ<InboundCharLook>      charLook_;
     SessionQ<u32>                  resyncReq_; // v61: join ids asking for a resync
+    SessionQ<TradeReqPacket>       tradeReq_;  // v62: consent trade
+    SessionQ<TradeRespPacket>      tradeResp_;
     // SESSION-PRESERVING: the host's join permissions (protocol 56) are a
     // session setting, not world state - a world swap must not drop them.
     SessionQ<InboundPerms>         perms_;

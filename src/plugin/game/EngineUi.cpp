@@ -409,6 +409,17 @@ void onHostSetBtn(DataPanelLine*) {
 void (*g_newGameCycleFn)(int) = 0;
 void (*g_editLookFn)() = 0;
 void (*g_resyncFn)() = 0;
+void (*g_tradeAnswerFn)(int, bool) = 0;
+DataPanelLine* g_tradeBtns[8] = { 0, 0, 0, 0, 0, 0, 0, 0 }; // [2i] accept, [2i+1] decline
+void onTradeBtn(DataPanelLine* line) {
+    for (int i = 0; i < 8; ++i) {
+        if (g_tradeBtns[i] && (DataPanelLine*)g_tradeBtns[i] == line) {
+            if (g_tradeAnswerFn) g_tradeAnswerFn(i / 2, (i % 2) == 0);
+            g_panel.needsRebuild = true;
+            return;
+        }
+    }
+}
 void (*g_reportFn)() = 0;
 DataPanelLine* g_resyncBtn = 0;
 DataPanelLine* g_reportBtn = 0;
@@ -635,6 +646,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
     g_newGameCycleFn = st->onNewGameCycle;
     g_editLookFn = st->onEditLook;
     g_resyncFn = st->onResync;
+    g_tradeAnswerFn = st->onTradeAnswer;
     g_reportFn = st->onReport;
     g_pauseToggleFn = st->onPauseToggle;
     ForgottenGUI* g = ::gui; // KenshiLib data export (spike 46)
@@ -863,6 +875,11 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
         sig += st->autoHost ? "A" : "a";
         sig += st->gamePaused ? "Z" : "z";
         sig += st->lookEditing ? "E" : "e";
+        if (st->onTradeAnswer)
+            for (int ti = 0; ti < st->tradeCount && ti < 4; ++ti) {
+                sig += "|t";
+                sig += st->tradeText[ti] ? st->tradeText[ti] : "";
+            }
         if (st->onNewGameCycle) {
             sig += "|m"; sig += st->newGameMoney ? st->newGameMoney : "";
             sig += "|s"; sig += st->newGameStats ? st->newGameStats : "";
@@ -888,6 +905,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             g_inviteBtn = 0; g_hostSetBtn = 0; g_autoHostBtn = 0; g_pauseBtn = 0;
             g_newGameBtns[0] = 0; g_newGameBtns[1] = 0;
             g_editLookBtn = 0; g_resyncBtn = 0; g_reportBtn = 0;
+            for (int i = 0; i < 8; ++i) g_tradeBtns[i] = 0;
 #define ROW(k, kk, vv, o) do { if (n < SIMPLE_ROWS_MAX) { keys[n] = (kk); vals[n] = (vv); \
             rows[n].kind = (k); rows[n].key = &keys[n]; rows[n].val = &vals[n]; \
             rows[n].out = (DataPanelLine**)(o); ++n; } } while (0)
@@ -936,6 +954,17 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                                            ? std::string("Editing your character - close the editor when done")
                                            : std::string("Edit my character"),
                         &g_editLookBtn);
+                if (st->onTradeAnswer && st->tradeCount > 0) {
+                    ROW(0, "Requests", "Trade requests for your characters:", 0);
+                    for (int ti = 0; ti < st->tradeCount && ti < 4; ++ti) {
+                        char ka[8], kd[8];
+                        _snprintf(ka, sizeof(ka) - 1, "tra%d", ti); ka[sizeof(ka) - 1] = 0;
+                        _snprintf(kd, sizeof(kd) - 1, "trd%d", ti); kd[sizeof(kd) - 1] = 0;
+                        ROW(1, ka, std::string("    Give: ") + (st->tradeText[ti] ? st->tradeText[ti] : "?"),
+                            &g_tradeBtns[ti * 2]);
+                        ROW(1, kd, "        Decline", &g_tradeBtns[ti * 2 + 1]);
+                    }
+                }
                 if (st->onResync)
                     ROW(1, "resync", "Resync    (everyone reloads the host's world, ~10 s)", &g_resyncBtn);
                 if (st->onReport) ROW(1, "report", "Save a problem report (to your Desktop)", &g_reportBtn);
@@ -996,6 +1025,8 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                 if (g_newGameBtns[i]) g_newGameBtns[i]->callback = MyGUI::newDelegate(&onNewGameBtn);
             if (g_editLookBtn) g_editLookBtn->callback = MyGUI::newDelegate(&onEditLookBtn);
             if (g_resyncBtn) g_resyncBtn->callback = MyGUI::newDelegate(&onResyncBtn);
+            for (int i = 0; i < 8; ++i)
+                if (g_tradeBtns[i]) g_tradeBtns[i]->callback = MyGUI::newDelegate(&onTradeBtn);
             if (g_reportBtn) g_reportBtn->callback = MyGUI::newDelegate(&onReportBtn);
             for (int i = 0; i < GAME_ROWS_MAX; ++i)
                 if (g_gameBtns[i]) g_gameBtns[i]->callback = MyGUI::newDelegate(&onGameBtn);

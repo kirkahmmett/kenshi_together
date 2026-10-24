@@ -203,6 +203,10 @@ public:
     // v60 character editor: header + name + race + appearance bytes. Host:
     // broadcast (an OFFER names its target); join: to the host.
     void queueResyncReq(const ResyncReqPacket& pkt); // join -> host (v61)
+    // v62 consent trade. Host: broadcast (rows carry their target); join: to
+    // the host, which relays to the other joins.
+    void queueTradeReq(const TradeReqPacket& pkt);
+    void queueTradeResp(const TradeRespPacket& pkt);
     void queueCharLook(const CharLookHeader& hdr, const std::string& name,
                        const std::string& race, const std::vector<u8>& data);
 
@@ -370,6 +374,8 @@ private:
     std::vector<LoadReadyPacket> outLoadReady_;
     std::vector<std::vector<u8> > outCharLook_; // whole packets
     std::vector<ResyncReqPacket>  outResyncReq_;
+    std::vector<TradeReqPacket>   outTradeReq_;
+    std::vector<TradeRespPacket>  outTradeResp_;
 
     HANDLE        thread_;
     volatile LONG running_;

@@ -125,6 +125,8 @@ static void testSizes() {
     CHECK_EQ("sizeof(LoadReadyPacket)",         sizeof(LoadReadyPacket),          9); // v59: ready barrier
     CHECK_EQ("sizeof(CharLookHeader)",          sizeof(CharLookHeader),          38); // v60: character editor
     CHECK_EQ("sizeof(ResyncReqPacket)",         sizeof(ResyncReqPacket),          5); // v61: resync request
+    CHECK_EQ("sizeof(TradeReqPacket)",          sizeof(TradeReqPacket),         157); // v62: consent trade
+    CHECK_EQ("sizeof(TradeRespPacket)",         sizeof(TradeRespPacket),         18); // v62: consent trade
     CHECK_EQ("sizeof(CamHintPacket)",           sizeof(CamHintPacket),           17); // v43: camera hint
     CHECK_EQ("sizeof(CellClaimPacket)",         sizeof(CellClaimPacket),         21); // v49: cell claim
     CHECK_EQ("sizeof(InvXferAckPacket)",        sizeof(InvXferAckPacket),        18); // v50: transfer verdict
@@ -317,8 +319,8 @@ static void testSizes() {
     CHECK_EQ("EVT_SQUAD_MOVE id", (int)EVT_SQUAD_MOVE, 11);
     CHECK("EVT_SQUAD_MOVE distinct", EVT_SQUAD_MOVE != EVT_RECRUIT &&
           EVT_SQUAD_MOVE != EVT_NONE && EVT_SQUAD_MOVE != EVT_EXIT_FURNITURE);
-    CHECK_EQ("PROTOCOL_VERSION (v61: resync request)",
-             (int)PROTOCOL_VERSION, 61);
+    CHECK_EQ("PROTOCOL_VERSION (v62: consent trade)",
+             (int)PROTOCOL_VERSION, 62);
 
     // Protocol 52: the shared money pool. The two players spend from ONE wallet,
     // so the join reports CHANGES and the host the authoritative TOTAL - swap

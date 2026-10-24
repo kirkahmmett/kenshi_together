@@ -1293,6 +1293,190 @@ void onReportRequest() {
     uiNotice(std::string("Report saved on your Desktop: ") + leaf);
 }
 
+// ---- Consent trade (protocol 62) ---------------------------------------------
+// A take the rule refused becomes a request to the item's owner; they answer in
+// the panel; on accept THEIR client moves the item (owner-authoritative
+// inventory) and the answer goes back. Requests expire after TRADE_EXPIRE_MS.
+struct PendingTrade {
+    coop::TradeReqPacket req;
+    DWORD                tick;
+};
+std::vector<PendingTrade> g_tradeIn;      // requests waiting for OUR answer
+coop::u32                 g_tradeReqSeq = 0;
+const DWORD               TRADE_EXPIRE_MS = 120000;
+const size_t              TRADE_MAX_PENDING = 4;
+std::string               g_tradeText[4];  // panel lines (kept alive for the panel)
+
+std::string playerName(coop::u32 id) {
+    std::map<coop::u32, std::string>::const_iterator it = g_names.find(id);
+    if (it != g_names.end()) return it->second;
+    char b[24];
+    _snprintf(b, sizeof(b) - 1, id == 0 ? "the host" : "player %u", (unsigned)id);
+    b[sizeof(b) - 1] = '\0';
+    return b;
+}
+
+// Which player owns the character at `hand`: the player its squad is named after.
+// An away squad's owner is offline (returns false). Scripted sessions have no
+// names: there the other side of a two-player test is the answer.
+bool ownerOfCharacter(const unsigned int hand[5], coop::u32* out, bool* away) {
+    *away = false;
+    char sq[64];
+    sq[0] = '\0';
+    coop::engine::getSquadNameByHand(hand, sq, sizeof(sq));
+    if (isAwayName(sq)) { *away = true; return false; }
+    for (std::map<coop::u32, std::string>::const_iterator it = g_names.begin(); it != g_names.end(); ++it)
+        if (it->second == sq) { *out = it->first; return true; }
+    if (realSession()) { *out = 0; return true; } // unnamed squads are the host's
+    if (!g_cfg.isHost) { *out = 0; return true; }
+    if (!g_peers.empty()) { *out = *g_peers.begin(); return true; }
+    return false;
+}
+
+void sendTradeRequest(const coop::engine::TakeRequestEdge& e) {
+    coop::u32 owner = 0;
+    bool away = false;
+    if (!ownerOfCharacter(e.src, &owner, &away)) {
+        uiNotice(away ? "That player is away - ask them when they are back"
+                      : "Could not tell whose item that is");
+        return;
+    }
+    if (owner == g_net.localId()) return;
+    coop::TradeReqPacket r;
+    memset(&r, 0, sizeof(r));
+    r.type = (coop::u8)coop::PKT_TRADE_REQ;
+    r.ownerId = g_net.localId();
+    r.target = owner;
+    r.reqId = ++g_tradeReqSeq;
+    memcpy(r.src, e.src, sizeof(r.src));
+    memcpy(r.dst, e.dst, sizeof(r.dst));
+    r.typeCat = e.typeCat;
+    r.qty = e.qty;
+    memcpy(r.sid, e.sid, sizeof(r.sid));
+    memcpy(r.name, e.name, sizeof(r.name));
+    r.sid[sizeof(r.sid) - 1] = '\0'; r.name[sizeof(r.name) - 1] = '\0';
+    g_net.queueTradeReq(r);
+    char b[200];
+    _snprintf(b, sizeof(b) - 1, "[trade] asked %s for '%s' x%d (req %u)",
+              playerName(owner).c_str(), r.name, (int)r.qty, (unsigned)r.reqId);
+    b[sizeof(b) - 1] = '\0'; coopLog(b);
+    uiNotice("Asked " + playerName(owner) + " for " + r.name + " - waiting for their answer");
+}
+
+void answerTrade(size_t i, bool accept, bool expired) {
+    if (i >= g_tradeIn.size()) return;
+    coop::TradeReqPacket q = g_tradeIn[i].req;
+    g_tradeIn.erase(g_tradeIn.begin() + i);
+    int moved = 0;
+    if (accept && g_lastGw && g_repl.ownerClassForHand(q.src) == 1) {
+        moved = coop::engine::moveItemBetweenContainers(g_lastGw, q.src, q.dst, q.sid,
+                                                        q.typeCat, q.qty, /*suspendVeto*/ true);
+        if (moved == 0 && coop::engine::lastMoveFailReason() == 2) moved = -2; // no room
+    }
+    coop::TradeRespPacket p;
+    memset(&p, 0, sizeof(p));
+    p.type = (coop::u8)coop::PKT_TRADE_RESP;
+    p.ownerId = g_net.localId();
+    p.target = q.ownerId;
+    p.reqId = q.reqId;
+    p.accepted = accept ? 1 : 0;
+    p.moved = moved;
+    g_net.queueTradeResp(p);
+    char b[200];
+    _snprintf(b, sizeof(b) - 1, "[trade] %s %s's request for '%s' x%d - moved %d",
+              expired ? "expired" : (accept ? "accepted" : "declined"),
+              playerName(q.ownerId).c_str(), q.name, (int)q.qty, moved);
+    b[sizeof(b) - 1] = '\0'; coopLog(b);
+    if (accept && moved == 0) uiNotice(std::string("Could not give ") + q.name + " - it is no longer there");
+    if (accept && moved == -2) uiNotice(std::string("Could not give ") + q.name + " - their character has no room");
+}
+
+void onTradeAnswer(int index, bool accept) { answerTrade((size_t)index, accept, false); }
+
+void tickTrade(GameWorld* gw) {
+    // Our refused takes -> requests.
+    coop::engine::TakeRequestEdge edges[8];
+    unsigned int ne = coop::engine::drainTakeRequests(edges, 8);
+    if (g_peerPresent)
+        for (unsigned int i = 0; i < ne; ++i) sendTradeRequest(edges[i]);
+    // Test lever (KENSHICOOP_TRADE_TEST=N): N s into the game a join asks for the
+    // first loose item of a character of the other player's; the host accepts
+    // any request 3 s after it arrives.
+    static int ttS = -1;
+    static bool ttFired = false;
+    if (ttS < 0) { const char* e = getenv("KENSHICOOP_TRADE_TEST"); ttS = (e && e[0]) ? atoi(e) : 0; }
+    DWORD now = GetTickCount();
+    if (ttS > 0 && !ttFired && !g_cfg.isHost && g_peerPresent && g_gameStarted && gw &&
+        now - g_gameStartTick >= (DWORD)ttS * 1000u) {
+        ttFired = true;
+        std::vector<SquadTab> tabs;
+        listSquadTabs(gw, tabs);
+        const SquadTab* theirs = 0; const SquadTab* mine = 0;
+        for (size_t t = 0; t < tabs.size(); ++t) {
+            int c = g_repl.ownerClassForHand(tabs[t].hand);
+            if (c == 2 && !theirs) theirs = &tabs[t];
+            if (c == 1 && !mine) mine = &tabs[t];
+        }
+        coop::engine::TakeRequestEdge e;
+        memset(&e, 0, sizeof(e));
+        if (theirs && mine &&
+            coop::engine::firstItemOf(theirs->hand, e.sid, sizeof(e.sid), &e.typeCat, e.name, sizeof(e.name))) {
+            memcpy(e.src, theirs->hand, sizeof(e.src));
+            memcpy(e.dst, mine->hand, sizeof(e.dst));
+            e.qty = 1;
+            coopLog("[trade] TEST: asking for an item");
+            sendTradeRequest(e);
+        } else {
+            char tb[128];
+            _snprintf(tb, sizeof(tb) - 1, "[trade] TEST: no item to ask for (tabs=%u theirs=%d mine=%d)",
+                      (unsigned)tabs.size(), theirs ? 1 : 0, mine ? 1 : 0);
+            tb[sizeof(tb) - 1] = 0;
+            coopLog(tb);
+        }
+    }
+    // Requests for our characters.
+    std::deque<coop::TradeReqPacket> reqs;
+    g_inbound.drainTradeReqs(reqs);
+    for (std::deque<coop::TradeReqPacket>::iterator it = reqs.begin(); it != reqs.end(); ++it) {
+        if (it->target != g_net.localId() || it->ownerId == g_net.localId()) continue;
+        it->sid[sizeof(it->sid) - 1] = '\0'; it->name[sizeof(it->name) - 1] = '\0';
+        PendingTrade pt; pt.req = *it; pt.tick = now;
+        g_tradeIn.push_back(pt);
+        if (g_tradeIn.size() > TRADE_MAX_PENDING) answerTrade(0, false, true); // oldest goes
+        char b[200];
+        _snprintf(b, sizeof(b) - 1, "[trade] %s asks for '%s' x%d (req %u)",
+                  playerName(it->ownerId).c_str(), it->name, (int)it->qty, (unsigned)it->reqId);
+        b[sizeof(b) - 1] = '\0'; coopLog(b);
+        char kb[16];
+        _snprintf(kb, sizeof(kb) - 1, "F%d", g_cfg.panelKeyVk - 0x70 + 1);
+        kb[sizeof(kb) - 1] = '\0';
+        uiNotice(playerName(it->ownerId) + " asks for your " + it->name + " - press " + kb + " to answer");
+    }
+    // Answers to our requests.
+    std::deque<coop::TradeRespPacket> resps;
+    g_inbound.drainTradeResps(resps);
+    for (std::deque<coop::TradeRespPacket>::iterator it = resps.begin(); it != resps.end(); ++it) {
+        if (it->target != g_net.localId()) continue;
+        char b[160];
+        _snprintf(b, sizeof(b) - 1, "[trade] %s %s request %u (moved %d)",
+                  playerName(it->ownerId).c_str(), it->accepted ? "accepted" : "declined",
+                  (unsigned)it->reqId, (int)it->moved);
+        b[sizeof(b) - 1] = '\0'; coopLog(b);
+        uiNotice(playerName(it->ownerId) + (it->accepted && it->moved > 0 ? " gave you the item"
+                                            : it->accepted && it->moved == -2 ? " agreed, but your character has no room"
+                                            : it->accepted ? " agreed, but the item was gone"
+                                                           : " declined your request"));
+    }
+    // Expiry + the test lever's auto-accept.
+    for (size_t i = 0; i < g_tradeIn.size();) {
+        DWORD age = now - g_tradeIn[i].tick;
+        if (ttS > 0 && age >= 3000) { answerTrade(i, true, false); continue; }
+        if (age >= TRADE_EXPIRE_MS) { answerTrade(i, false, true); continue; }
+        ++i;
+    }
+    if (!g_peerPresent && !g_tradeIn.empty()) g_tradeIn.clear();
+}
+
 // Drain peer connect/leave events and surface a single game-thread confirmation
 // per event. The net thread already logs the handshake; this proves the event
 // reached the game thread cleanly (and is where later stages spawn/sweep).
@@ -1988,6 +2172,17 @@ void coopPanelDrive() {
     ps.lookEditing = g_lookEditing;
     ps.onResync = (g_peerPresent && realSession() && g_cfg.saveSync) ? &onResyncRequest : 0;
     ps.onReport = &onReportRequest;
+    ps.tradeCount = 0;
+    for (size_t ti = 0; ti < g_tradeIn.size() && ti < 4; ++ti) {
+        char tb[160];
+        _snprintf(tb, sizeof(tb) - 1, "%s wants %s x%d", playerName(g_tradeIn[ti].req.ownerId).c_str(),
+                  g_tradeIn[ti].req.name, (int)g_tradeIn[ti].req.qty);
+        tb[sizeof(tb) - 1] = '\0';
+        g_tradeText[ti] = tb;
+        ps.tradeText[ti] = g_tradeText[ti].c_str();
+        ++ps.tradeCount;
+    }
+    ps.onTradeAnswer = g_peerPresent ? &onTradeAnswer : 0;
     // Only the host pauses, and only on purpose (Space / panel button);
     // trade and dialogue windows no longer stop the game for everyone.
     coop::engine::setMultiplayerPauseRules(g_net.isRunning());
@@ -2890,6 +3085,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     KC_PERF(S_NET_EVENTS, tickModCheck());
     KC_PERF(S_NET_EVENTS, tickLook(gw));
     KC_PERF(S_NET_EVENTS, tickResync());
+    KC_PERF(S_NET_EVENTS, tickTrade(gw));
     KC_PERF(S_NET_EVENTS, tickRoster(gw));
 
     // Coordinated load (protocol 32): the JOIN never loads locally while a
