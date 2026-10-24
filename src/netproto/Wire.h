@@ -25,7 +25,7 @@ typedef double         f64;
 // this header stays a definition file. When you bump PROTOCOL_VERSION, add the
 // matching entry at the bottom of that doc. The version is checked at handshake
 // and a mismatch is rejected (no back-compat).
-const u16 PROTOCOL_VERSION = 59;
+const u16 PROTOCOL_VERSION = 60;
 
 // Packet type tags (first byte of every packet).
 enum PacketType {
@@ -80,7 +80,8 @@ enum PacketType {
     PKT_PERMS            = 49,// RELIABLE host's join-permission settings (protocol 56); PermsPacket
     PKT_PEER_LEFT        = 50,// RELIABLE another player left (host -> joins, protocol 57); PeerLeftPacket
     PKT_ROSTER           = 51,// RELIABLE one player's display name (host -> joins, protocol 57); RosterPacket
-    PKT_LOAD_READY       = 52 // RELIABLE a join finished loading a coordinated load (join -> host, v59); LoadReadyPacket
+    PKT_LOAD_READY       = 52,// RELIABLE a join finished loading a coordinated load (join -> host, v59); LoadReadyPacket
+    PKT_CHAR_LOOK        = 53 // RELIABLE character editor offer / result (v60); CharLookHeader + name + race + appearance
 };
 
 // One-shot transition events carried on the RELIABLE channel. Continuous state
@@ -1630,6 +1631,31 @@ struct LoadReadyPacket {
     u8  type;           // = PKT_LOAD_READY
     u32 ownerId;        // the join
     u32 loadId;         // the LOAD_GO it loaded
+};
+
+// Protocol 60 (character editor for joining players). A player who joins gets a
+// squad the host made for them; they then shape that character in Kenshi's own
+// editor. Variable length: [CharLookHeader][name][race sid][appearance file].
+//   OFFER (host -> joins, broadcast): `target` should open the editor on their
+//         own squad; no payload.
+//   APPLY (join -> host): the edited character (hand), its name, race sid and
+//         the appearance GameData as written by GameData::saveToFile. The host
+//         writes it into its copy, saves, and reloads everyone so all clients
+//         share the result. Not relayed.
+const u8  CHAR_LOOK_OFFER    = 0;
+const u8  CHAR_LOOK_APPLY    = 1;
+const u16 CHAR_LOOK_NAME_MAX = 48;
+const u16 CHAR_LOOK_RACE_MAX = 96;
+const u32 CHAR_LOOK_DATA_MAX = 65536;
+struct CharLookHeader {
+    u8  type;     // = PKT_CHAR_LOOK
+    u8  kind;     // CHAR_LOOK_OFFER / CHAR_LOOK_APPLY
+    u32 ownerId;  // sender
+    u32 target;   // OFFER: the player to edit; APPLY: the sender
+    u32 hand[5];  // APPLY: the character (readObjectHand layout); OFFER: zero
+    u16 nameLen;  // bytes of name following the header (0..CHAR_LOOK_NAME_MAX)
+    u16 raceLen;  // bytes of race sid following the name (0..CHAR_LOOK_RACE_MAX)
+    u32 dataLen;  // bytes of appearance file following the race (0..CHAR_LOOK_DATA_MAX)
 };
 
 const unsigned int ROSTER_NAME_MAX = 32;

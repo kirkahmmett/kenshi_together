@@ -69,3 +69,19 @@ build** after a bump.
 - Not on the wire: the inventory detours pass calls from any thread other than
   the game's main thread straight to the engine (Kenshi's loader thread adds
   items while a world loads).
+
+## 60 - character editor for joining players
+
+- `PKT_CHAR_LOOK` (53), variable length: `CharLookHeader` (38 bytes) + name +
+  race sid + appearance file. OFFER (host -> joins, broadcast, `target` names
+  the player): sent once a player whose squad the host just made (random
+  character or a free start character) has finished loading; that player's
+  client opens Kenshi's own editor (`PlayerInterface::activateCharacterEditMode`)
+  on their character. APPLY (join -> host): when the editor closes, the look -
+  `GameData::saveToFile` of the appearance data, race sid, name. The host
+  accepts it only for the sender's own squad, loads it into its copy, saves and
+  reloads everyone. Not relayed.
+- Panel: "Edit my character" reopens the editor at any time (the host's own
+  edit also reloads everyone).
+- Test lever `KENSHICOOP_LOOK_TEST=N`: a join opens the editor N s into the game
+  and closes it 4 s later.

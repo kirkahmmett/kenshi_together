@@ -54,6 +54,15 @@ unsigned long wallClockMs() {
 
 void logSetFakeSkewMs(long skewMs) { g_fakeSkewMs = skewMs; }
 
+void logSetTag(const char* modeTag) {
+    if (!modeTag || !g_init) return;
+    EnterCriticalSection(&g_cs);
+    size_t i = 0;
+    for (; modeTag[i] && i < sizeof(g_tag) - 1; ++i) g_tag[i] = modeTag[i];
+    g_tag[i] = '\0';
+    LeaveCriticalSection(&g_cs);
+}
+
 void logInit(const char* path, const char* modeTag) {
     if (g_init) return;
     InitializeCriticalSection(&g_cs);

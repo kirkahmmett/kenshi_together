@@ -310,6 +310,15 @@ void NetLink::queueLoadReq(const LoadReqPacket& pkt) { pushLocked(outCs_, outLoa
 
 void NetLink::queueLoadNack(const LoadNackPacket& pkt) { pushLocked(outCs_, outLoadNack_, pkt); }
 void NetLink::queueLoadReady(const LoadReadyPacket& pkt) { pushLocked(outCs_, outLoadReady_, pkt); }
+void NetLink::queueCharLook(const CharLookHeader& hdr, const std::string& name,
+                            const std::string& race, const std::vector<u8>& data) {
+    std::vector<u8> pk(sizeof(CharLookHeader));
+    std::memcpy(&pk[0], &hdr, sizeof(hdr));
+    pk.insert(pk.end(), name.begin(), name.end());
+    pk.insert(pk.end(), race.begin(), race.end());
+    pk.insert(pk.end(), data.begin(), data.end());
+    pushLocked(outCs_, outCharLook_, pk);
+}
 
 void NetLink::setNetSim(unsigned int delayMs, unsigned int jitterMs, unsigned int lossPct) {
     simDelayMs_  = delayMs;
@@ -1097,6 +1106,21 @@ void NetLink::threadLoop() {
                         if (readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &lr)
                             && inbound_) {
                             inbound_->pushLoadReq(lr.ownerId, lr);
+                        }
+                    } else if (type == PKT_CHAR_LOOK) {
+                        // v60 character editor: [CharLookHeader][name][race][appearance].
+                        const unsigned len = (unsigned)ev.packet->dataLength;
+                        if (len >= sizeof(CharLookHeader) && inbound_) {
+                            CharLookHeader hdr;
+                            std::memcpy(&hdr, ev.packet->data, sizeof(hdr));
+                            unsigned need = sizeof(CharLookHeader) + (unsigned)hdr.nameLen
+                                          + (unsigned)hdr.raceLen + hdr.dataLen;
+                            if (len >= need && hdr.nameLen <= CHAR_LOOK_NAME_MAX &&
+                                hdr.raceLen <= CHAR_LOOK_RACE_MAX &&
+                                hdr.dataLen <= CHAR_LOOK_DATA_MAX &&
+                                (isHost_ ? hdr.kind == CHAR_LOOK_APPLY : hdr.kind == CHAR_LOOK_OFFER))
+                                inbound_->pushCharLook(isHost_ ? (u32)(size_t)ev.peer->data : 0,
+                                                       hdr, ev.packet->data + sizeof(CharLookHeader));
                         }
                     } else if (type == PKT_LOAD_READY) {
                         // A join finished loading (protocol 59, join -> host).
@@ -2057,6 +2081,21 @@ void NetLink::threadLoop() {
         loadNacks.swap(outLoadNack_);
         loadReadys.swap(outLoadReady_);
         LeaveCriticalSection(&outCs_);
+        std::vector<std::vector<u8> > charLooks;
+        EnterCriticalSection(&outCs_);
+        charLooks.swap(outCharLook_);
+        LeaveCriticalSection(&outCs_);
+        for (size_t i = 0; i < charLooks.size(); ++i) {
+            ENetPacket* out = enet_packet_create(&charLooks[i][0], charLooks[i].size(),
+                                                 ENET_PACKET_FLAG_RELIABLE);
+            if (isHost_) {
+                enet_host_broadcast(enetHost_, CH_RELIABLE, out);
+            } else if (serverPeer_ && serverPeer_->state == ENET_PEER_STATE_CONNECTED) {
+                enet_peer_send(serverPeer_, CH_RELIABLE, out);
+            } else {
+                enet_packet_destroy(out);
+            }
+        }
         for (size_t i = 0; i < loadReadys.size(); ++i) {
             if (isHost_ || !serverPeer_ || serverPeer_->state != ENET_PEER_STATE_CONNECTED) continue;
             enet_peer_send(serverPeer_, CH_RELIABLE,

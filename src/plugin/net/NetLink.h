@@ -200,6 +200,10 @@ public:
     void queueLoadReq(const LoadReqPacket& pkt);
     void queueLoadNack(const LoadNackPacket& pkt);
     void queueLoadReady(const LoadReadyPacket& pkt); // join -> host (v59)
+    // v60 character editor: header + name + race + appearance bytes. Host:
+    // broadcast (an OFFER names its target); join: to the host.
+    void queueCharLook(const CharLookHeader& hdr, const std::string& name,
+                       const std::string& race, const std::vector<u8>& data);
 
     // Debug WAN simulation. When delayMs > 0, received entity batches are held in a
     // net-thread queue and delivered to the game thread only after delayMs +/- jitter
@@ -363,6 +367,7 @@ private:
     std::vector<LoadReqPacket>   outLoadReq_;
     std::vector<LoadNackPacket>  outLoadNack_;
     std::vector<LoadReadyPacket> outLoadReady_;
+    std::vector<std::vector<u8> > outCharLook_; // whole packets
 
     HANDLE        thread_;
     volatile LONG running_;

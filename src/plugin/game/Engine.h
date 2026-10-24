@@ -776,6 +776,19 @@ void setTakeFromPlayers(bool allowed);
 // Control lock: while on, enforceOwnSelection (call once per tick) deselects any
 // selected squad member that belongs to another player. Returns how many.
 void setControlLock(bool on);
+// Character editor (v60). openCharacterEditor opens Kenshi's own editor on the
+// character at `hand` (PlayerInterface::activateCharacterEditMode).
+// characterEditorOpen: 1 open, 0 closed, -1 unknown. exportCharacterLook writes
+// the appearance GameData to `path` and reads the name + race sid;
+// importCharacterLook loads such a file into the character's appearance and
+// sets race (when it differs) and name. Both resolve the character by hand.
+bool openCharacterEditor(GameWorld* gw, const unsigned int hand[5]);
+int  characterEditorOpen(GameWorld* gw);
+bool closeCharacterEditor(GameWorld* gw); // test lever: PlayerInterface::setCharacterEditMode(false)
+bool exportCharacterLook(const unsigned int hand[5], const std::string& path,
+                         std::string& name, std::string& raceSid);
+bool importCharacterLook(GameWorld* gw, const unsigned int hand[5], const std::string& path,
+                         const std::string& name, const std::string& raceSid);
 unsigned int enforceOwnSelection(GameWorld* gw);
 // Record the game's main thread (call from the main loop). The inventory
 // detours pass calls from any other thread straight to the engine.

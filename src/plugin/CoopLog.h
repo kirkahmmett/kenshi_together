@@ -21,6 +21,8 @@ namespace coop {
 // Open the log file at 'path' (truncating any previous run) and remember a
 // short mode tag (e.g. "HOST"/"JOIN"). Safe to call once at plugin load.
 void logInit(const char* path, const char* modeTag);
+// Change the [HOST]/[JOIN] tag after start-up (the role is picked in the panel).
+void logSetTag(const char* modeTag);
 
 // The wall clock every timestamp in this plugin derives from: milliseconds
 // since local midnight PLUS the injected fake skew (see logSetFakeSkewMs).

@@ -94,6 +94,10 @@ struct CoopPanelState {
     const char*        newGameMoney;
     const char*        newGameStats;
     void               (*onNewGameCycle)(int which);
+    // Character editor (v60): in a session, a button that opens Kenshi's editor
+    // on your own character (null = hidden); lookEditing while it is open.
+    void               (*onEditLook)();
+    bool               lookEditing;
 };
 // The panel's role/transport selections at the moment Connect is hit. peerId is the
 // Steam ID pasted in-panel this session (0 if none), and overrides the config

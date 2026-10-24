@@ -11,6 +11,7 @@
 // (see resources/CODE_MAP.md).
 
 #include "EngineInternal.h"
+#include <kenshi/RaceData.h> // Character::myRace->data (character editor, v60)
 
 namespace coop {
 namespace engine {
@@ -115,6 +116,138 @@ unsigned int raiseAllStats(GameWorld* gw, const unsigned int subjHand[5], float 
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return 0;
     }
+}
+
+// ---- Character editor (protocol 60) ------------------------------------------
+// Kenshi's own editor (the new-game one) on a live character, plus the look's
+// export/import as a GameData file. Every engine call is resolved through
+// KenshiLib and made inside an SEH frame that owns no C++ objects; the callers
+// build the strings.
+typedef void (__fastcall* ActivateEditFn)(PlayerInterface* self, Character* c);
+typedef GameDataCopyStandalone* (__fastcall* GetAppearanceFn)(Character* self);
+typedef bool (__fastcall* GdSaveFileFn)(GameData* self, const std::string* path);
+typedef bool (__fastcall* GdLoadFileFn)(GameData* self, const std::string* path, itemType t);
+typedef void (__fastcall* SetRaceFn)(Character* self, GameData* r);
+typedef void (__fastcall* SetNameFn)(Character* self, const std::string* name);
+typedef GameData* (__fastcall* GdmGetDataFn)(GameDataManager* self, const std::string* sid, itemType t);
+static ActivateEditFn  g_activateEditFn = 0;
+static GetAppearanceFn g_getAppearanceFn = 0;
+static GdSaveFileFn    g_gdSaveFileFn = 0;
+static GdLoadFileFn    g_gdLoadFileFn = 0;
+static SetRaceFn       g_setRaceFn = 0;
+static SetNameFn       g_setNameFn = 0;
+static GdmGetDataFn    g_gdmGetDataFn = 0;
+static bool resolveLookFns() {
+    if (!g_activateEditFn)
+        g_activateEditFn = (ActivateEditFn)KenshiLib::GetRealAddress(&PlayerInterface::activateCharacterEditMode);
+    if (!g_getAppearanceFn)
+        g_getAppearanceFn = (GetAppearanceFn)KenshiLib::GetRealAddress(&Character::getAppearanceData);
+    if (!g_gdSaveFileFn)
+        g_gdSaveFileFn = (GdSaveFileFn)KenshiLib::GetRealAddress(&GameData::saveToFile);
+    if (!g_gdLoadFileFn)
+        g_gdLoadFileFn = (GdLoadFileFn)KenshiLib::GetRealAddress(&GameData::loadFromFile);
+    if (!g_setRaceFn)
+        g_setRaceFn = (SetRaceFn)KenshiLib::GetRealAddress(&Character::_NV_setRace);
+    if (!g_setNameFn)
+        g_setNameFn = (SetNameFn)KenshiLib::GetRealAddress(&Character::_NV_setName);
+    if (!g_gdmGetDataFn)
+        g_gdmGetDataFn = (GdmGetDataFn)KenshiLib::GetRealAddress(
+            static_cast<GameData* (GameDataManager::*)(const std::string&, itemType)>(&GameDataManager::getData));
+    return g_activateEditFn && g_getAppearanceFn && g_gdSaveFileFn && g_gdLoadFileFn &&
+           g_setRaceFn && g_setNameFn && g_gdmGetDataFn;
+}
+
+static Character* lookChar(const unsigned int hand[5]) {
+    return resolveCharByHand(hand[3], hand[4], hand[0], hand[1], hand[2]);
+}
+
+static bool openEditorSeh(GameWorld* gw, Character* c) {
+    __try {
+        if (!gw->player) return false;
+        g_activateEditFn(gw->player, c);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+bool openCharacterEditor(GameWorld* gw, const unsigned int hand[5]) {
+    if (!gw || !hand || !resolveLookFns()) return false;
+    Character* c = lookChar(hand);
+    return c ? openEditorSeh(gw, c) : false;
+}
+
+int characterEditorOpen(GameWorld* gw) {
+    if (!gw) return -1;
+    __try {
+        if (!gw->player) return -1;
+        return gw->player->characterEditorMode ? 1 : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return -1; }
+}
+
+typedef void (__fastcall* SetEditModeFn)(PlayerInterface* self, bool on);
+static SetEditModeFn g_setEditModeFn = 0;
+bool closeCharacterEditor(GameWorld* gw) {
+    if (!gw) return false;
+    if (!g_setEditModeFn)
+        g_setEditModeFn = (SetEditModeFn)KenshiLib::GetRealAddress(&PlayerInterface::setCharacterEditMode);
+    if (!g_setEditModeFn) return false;
+    __try {
+        if (!gw->player) return false;
+        g_setEditModeFn(gw->player, false);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+// Raw reads/writes: no C++ objects in these frames.
+static bool lookSaveSeh(Character* c, const std::string* path, const char** nameOut,
+                        const char** raceOut) {
+    __try {
+        GameDataCopyStandalone* ad = g_getAppearanceFn(c);
+        if (!ad || !g_gdSaveFileFn(ad, path)) return false;
+        *nameOut = c->displayName.c_str();
+        *raceOut = (c->myRace && c->myRace->data) ? c->myRace->data->stringID.c_str() : "";
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+bool exportCharacterLook(const unsigned int hand[5], const std::string& path,
+                         std::string& name, std::string& raceSid) {
+    if (!hand || !resolveLookFns()) return false;
+    Character* c = lookChar(hand);
+    if (!c) return false;
+    const char* nm = 0; const char* rc = 0;
+    if (!lookSaveSeh(c, &path, &nm, &rc)) return false;
+    name = nm ? nm : "";
+    raceSid = rc ? rc : "";
+    return true;
+}
+
+static int lookLoadSeh(GameWorld* gw, Character* c, const std::string* path,
+                       const std::string* name, const std::string* raceSid) {
+    int steps = 0;
+    __try {
+        if (raceSid->size() > 0) {
+            const char* cur = (c->myRace && c->myRace->data) ? c->myRace->data->stringID.c_str() : "";
+            if (strcmp(cur, raceSid->c_str()) != 0) {
+                GameData* rd = g_gdmGetDataFn(&gw->gamedata, raceSid, RACE);
+                if (rd) { g_setRaceFn(c, rd); steps |= 1; }
+            }
+        }
+        GameDataCopyStandalone* ad = g_getAppearanceFn(c);
+        if (ad && g_gdLoadFileFn(ad, path, ad->type)) steps |= 2;
+        if (name->size() > 0) { g_setNameFn(c, name); steps |= 4; }
+    } __except (EXCEPTION_EXECUTE_HANDLER) { steps |= 0x100; }
+    return steps;
+}
+bool importCharacterLook(GameWorld* gw, const unsigned int hand[5], const std::string& path,
+                         const std::string& name, const std::string& raceSid) {
+    if (!gw || !hand || !resolveLookFns()) return false;
+    Character* c = lookChar(hand);
+    if (!c) return false;
+    int st = lookLoadSeh(gw, c, &path, &name, &raceSid);
+    char b[128];
+    _snprintf(b, sizeof(b) - 1, "[look] import race=%d appearance=%d name=%d fault=%d",
+              (st & 1) ? 1 : 0, (st & 2) ? 1 : 0, (st & 4) ? 1 : 0, (st & 0x100) ? 1 : 0);
+    b[sizeof(b) - 1] = '\0';
+    coop::logLine(b);
+    return (st & 2) != 0 && (st & 0x100) == 0;
 }
 
 // Does any player-squad member (all tabs) come from the GameData template `sid`?

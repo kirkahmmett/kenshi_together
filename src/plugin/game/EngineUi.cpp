@@ -407,6 +407,12 @@ void onHostSetBtn(DataPanelLine*) {
     g_panel.needsRebuild = true;
 }
 void (*g_newGameCycleFn)(int) = 0;
+void (*g_editLookFn)() = 0;
+DataPanelLine* g_editLookBtn = 0;
+void onEditLookBtn(DataPanelLine*) {
+    if (g_editLookFn) g_editLookFn();
+    g_panel.needsRebuild = true;
+}
 DataPanelLine* g_newGameBtns[2] = { 0, 0 };
 void onNewGameBtn(DataPanelLine* line) {
     for (int i = 0; i < 2; ++i) {
@@ -621,6 +627,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
     g_onDisconnectFn = onDisconnect;
     g_autoHostToggleFn = st->onAutoHostToggle;
     g_newGameCycleFn = st->onNewGameCycle;
+    g_editLookFn = st->onEditLook;
     g_pauseToggleFn = st->onPauseToggle;
     ForgottenGUI* g = ::gui; // KenshiLib data export (spike 46)
     { static void* s_last = (void*)-1;
@@ -847,6 +854,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                                (g_panel.hostSettings ? "S" : "s");
         sig += st->autoHost ? "A" : "a";
         sig += st->gamePaused ? "Z" : "z";
+        sig += st->lookEditing ? "E" : "e";
         if (st->onNewGameCycle) {
             sig += "|m"; sig += st->newGameMoney ? st->newGameMoney : "";
             sig += "|s"; sig += st->newGameStats ? st->newGameStats : "";
@@ -871,6 +879,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             for (int i = 0; i < 4; ++i) g_permBtns[i] = 0;
             g_inviteBtn = 0; g_hostSetBtn = 0; g_autoHostBtn = 0; g_pauseBtn = 0;
             g_newGameBtns[0] = 0; g_newGameBtns[1] = 0;
+            g_editLookBtn = 0;
 #define ROW(k, kk, vv, o) do { if (n < SIMPLE_ROWS_MAX) { keys[n] = (kk); vals[n] = (vv); \
             rows[n].kind = (k); rows[n].key = &keys[n]; rows[n].val = &vals[n]; \
             rows[n].out = (DataPanelLine**)(o); ++n; } } while (0)
@@ -913,6 +922,11 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             } else {
                 ROW(0, "Status", "Status: " + statusVal, &statusLine);
                 if (!players.empty()) ROW(0, "Players", "Players: " + players, &infoLines[infoN++]);
+                if (st->onEditLook)
+                    ROW(1, "editlook", st->lookEditing
+                                           ? std::string("Editing your character - close the editor when done")
+                                           : std::string("Edit my character"),
+                        &g_editLookBtn);
                 ROW(2, "", "", 0);
                 if (st->isHost) {
                     if (g_pauseToggleFn)
@@ -968,6 +982,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             if (g_autoHostBtn) g_autoHostBtn->callback = MyGUI::newDelegate(&onAutoHostBtn);
             for (int i = 0; i < 2; ++i)
                 if (g_newGameBtns[i]) g_newGameBtns[i]->callback = MyGUI::newDelegate(&onNewGameBtn);
+            if (g_editLookBtn) g_editLookBtn->callback = MyGUI::newDelegate(&onEditLookBtn);
             for (int i = 0; i < GAME_ROWS_MAX; ++i)
                 if (g_gameBtns[i]) g_gameBtns[i]->callback = MyGUI::newDelegate(&onGameBtn);
             for (int i = 0; i < INVITE_ROWS_MAX; ++i)

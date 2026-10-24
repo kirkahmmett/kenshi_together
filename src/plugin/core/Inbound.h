@@ -352,6 +352,16 @@ struct InboundLoadNack {
     LoadNackPacket pkt;
 };
 
+// Character editor (v60): an offer or an edited look (see CharLookHeader).
+// senderId is the transport's id for the sending peer (0 = the host).
+struct InboundCharLook {
+    u32             senderId;
+    CharLookHeader  hdr;
+    std::string     name;
+    std::string     race;
+    std::vector<u8> data;
+};
+
 // Mod list check (v59): playerId's enabled mod list differs from ours (on a
 // join, playerId 0 = the host). theirCount/ourCount are the mod counts.
 struct InboundModCheck {
@@ -719,6 +729,19 @@ public:
         InboundLoadNack ln; ln.ownerId = ownerId; ln.pkt = pkt;
         EnterCriticalSection(&cs_); loadNack_.push_back(ln); LeaveCriticalSection(&cs_);
     }
+    void pushCharLook(u32 senderId, const CharLookHeader& hdr, const u8* tail) {
+        InboundCharLook cl;
+        cl.senderId = senderId;
+        cl.hdr = hdr;
+        const char* p = (const char*)tail;
+        cl.name.assign(p, p + hdr.nameLen); p += hdr.nameLen;
+        cl.race.assign(p, p + hdr.raceLen); p += hdr.raceLen;
+        if (hdr.dataLen > 0) cl.data.assign((const u8*)p, (const u8*)p + hdr.dataLen);
+        EnterCriticalSection(&cs_); charLook_.push_back(cl); LeaveCriticalSection(&cs_);
+    }
+    void drainCharLooks(std::deque<InboundCharLook>& out) {
+        EnterCriticalSection(&cs_); out.swap(charLook_); LeaveCriticalSection(&cs_);
+    }
     void pushModMismatch(u32 playerId, u16 theirs, u16 ours) {
         InboundModCheck m; m.playerId = playerId; m.theirCount = theirs; m.ourCount = ours;
         EnterCriticalSection(&cs_); modCheck_.push_back(m); LeaveCriticalSection(&cs_);
@@ -983,6 +1006,7 @@ private:
     SessionQ<InboundLoadNack>      loadNack_;
     SessionQ<InboundLoadReady>     loadReady_;
     SessionQ<InboundModCheck>      modCheck_;
+    SessionQ<InboundCharLook>      charLook_;
     // SESSION-PRESERVING: the host's join permissions (protocol 56) are a
     // session setting, not world state - a world swap must not drop them.
     SessionQ<InboundPerms>         perms_;

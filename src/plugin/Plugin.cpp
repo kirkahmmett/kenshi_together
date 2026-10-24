@@ -342,6 +342,54 @@ void onPermToggle(int which) {
     coopLog(b);
 }
 
+// ---- Character editor (protocol 60) ------------------------------------------
+// A player who joins gets a squad the host made for them - a random character,
+// or a free start character. The host OFFERS that player Kenshi's own editor once
+// they have loaded; when they close it, their look (appearance file, race, name)
+// goes to the host, which writes it into its copy, saves and reloads everyone.
+// Anyone can reopen it from the panel ("Edit my character").
+std::set<std::string> g_lookOfferNames; // host: players to offer the editor once loaded
+bool          g_lookWanted   = false;   // open the editor when the world is settled
+DWORD         g_lookWantTick = 0;
+bool          g_lookEditing  = false;   // our editor is open (or opening)
+bool          g_lookSeenOpen = false;
+DWORD         g_lookOpenTick = 0;
+unsigned int  g_lookHand[5]  = { 0, 0, 0, 0, 0 };
+DWORD         g_lastWorldResetTick = 0;
+const char*   LOOK_OUT_FILE  = "KenshiCoop_look_out.tmp";
+const char*   LOOK_IN_FILE   = "KenshiCoop_look_in.tmp";
+
+void sendLookOffer(coop::u32 playerId) {
+    coop::CharLookHeader h;
+    memset(&h, 0, sizeof(h));
+    h.type    = (coop::u8)coop::PKT_CHAR_LOOK;
+    h.kind    = coop::CHAR_LOOK_OFFER;
+    h.ownerId = g_net.localId();
+    h.target  = playerId;
+    g_net.queueCharLook(h, std::string(), std::string(), std::vector<coop::u8>());
+    char b[96];
+    _snprintf(b, sizeof(b) - 1, "[look] offered the character editor to player %u", (unsigned)playerId);
+    b[sizeof(b) - 1] = '\0';
+    coopLog(b);
+}
+
+// Host: a player finished loading - offer the editor if their squad is new.
+void offerLookIfPending(coop::u32 playerId) {
+    std::map<coop::u32, std::string>::const_iterator nm = g_names.find(playerId);
+    if (nm == g_names.end()) return;
+    std::set<std::string>::iterator it = g_lookOfferNames.find(nm->second);
+    if (it == g_lookOfferNames.end()) return;
+    g_lookOfferNames.erase(it);
+    sendLookOffer(playerId);
+}
+
+void onEditLookRequest() {
+    if (g_lookEditing) return;
+    g_lookWanted = true;
+    g_lookWantTick = GetTickCount() - 3000; // the panel press is "now"
+    coopLog("[look] editor requested from the panel");
+}
+
 // ---- Ready barrier (protocol 59) -------------------------------------------
 // When the host sends a LOAD_GO (a new player joining, or everyone reloading)
 // it holds the game paused for everyone until each connected join reports it
@@ -392,6 +440,7 @@ void tickReady() {
                   (unsigned)it->ownerId, (unsigned)g_readyWait.size());
         b[sizeof(b) - 1] = '\0';
         coopLog(b);
+        offerLookIfPending(it->ownerId);
     }
     // Someone who left is not waited for.
     for (std::set<coop::u32>::iterator it = g_readyWait.begin(); it != g_readyWait.end();) {
@@ -736,8 +785,10 @@ bool assignSquads(GameWorld* gw) {
             _snprintf(b, sizeof(b) - 1, "[names] squad '%s' -> '%s' (free tab)",
                       tabs[pick].name.c_str(), j->c_str());
             tabs[pick].name = *j;
+            g_lookOfferNames.insert(*j); // a start character: let them make it theirs
         } else if (coop::engine::createPlayerSquad(gw, j->c_str()) == 1) {
             created = true;
+            g_lookOfferNames.insert(*j); // a random character: let them make it theirs
             _snprintf(b, sizeof(b) - 1, "[names] new character + squad '%s'", j->c_str());
         } else {
             _snprintf(b, sizeof(b) - 1, "[names] FAILED to give '%s' a squad", j->c_str());
@@ -871,6 +922,10 @@ void sessionResetForWorldReload() {
     g_inbound.flushWorldState();
     g_net.bumpSessionEpoch(); // v44: post-reload batches supersede the old session
     coopLog("[load] inbound world-state queues flushed");
+    // An editor open across a world swap edits a character that no longer
+    // exists: drop it (an unfinished offer is kept and reopens on the new world).
+    if (g_lookEditing) { g_lookEditing = false; g_lookWanted = true; g_lookWantTick = GetTickCount(); }
+    g_lastWorldResetTick = GetTickCount();
 }
 
 // Push-save-on-connect (host): bake a fresh save of the live world and arm the
@@ -895,6 +950,163 @@ void armConnectPush() {
     b[sizeof(b) - 1] = '\0'; coopLog(b);
     if (!coop::engine::saveGameAs(name))
         coopErr("[boot] connect-push save FAILED to issue");
+}
+
+// The character this client plays: the squad tab named after us, else the first
+// squad member the owner classifier calls ours.
+bool myCharacterHand(GameWorld* gw, unsigned int out[5]) {
+    std::vector<SquadTab> tabs;
+    listSquadTabs(gw, tabs);
+    std::map<coop::u32, std::string>::const_iterator me = g_names.find(g_net.localId());
+    if (me != g_names.end())
+        for (size_t i = 0; i < tabs.size(); ++i)
+            if (tabs[i].name == me->second) { memcpy(out, tabs[i].hand, sizeof(tabs[i].hand)); return true; }
+    for (size_t i = 0; i < tabs.size(); ++i)
+        if (g_repl.ownerClassForHand(tabs[i].hand) == 1) { memcpy(out, tabs[i].hand, sizeof(tabs[i].hand)); return true; }
+    return false;
+}
+
+void sendLookApply(GameWorld* gw) {
+    std::string name, race;
+    if (!coop::engine::exportCharacterLook(g_lookHand, LOOK_OUT_FILE, name, race)) {
+        coopErr("[look] could not read the edited character");
+        return;
+    }
+    std::vector<coop::u8> data;
+    FILE* f = fopen(LOOK_OUT_FILE, "rb");
+    if (f) {
+        unsigned char buf[4096];
+        size_t got;
+        while ((got = fread(buf, 1, sizeof(buf), f)) > 0 && data.size() <= coop::CHAR_LOOK_DATA_MAX)
+            data.insert(data.end(), buf, buf + got);
+        fclose(f);
+    }
+    if (data.empty() || data.size() > coop::CHAR_LOOK_DATA_MAX) {
+        coopErr("[look] appearance file missing or too large - not sent");
+        return;
+    }
+    if (name.size() > coop::CHAR_LOOK_NAME_MAX) name.resize(coop::CHAR_LOOK_NAME_MAX);
+    if (race.size() > coop::CHAR_LOOK_RACE_MAX) race.clear();
+    coop::CharLookHeader h;
+    memset(&h, 0, sizeof(h));
+    h.type    = (coop::u8)coop::PKT_CHAR_LOOK;
+    h.kind    = coop::CHAR_LOOK_APPLY;
+    h.ownerId = g_net.localId();
+    h.target  = g_net.localId();
+    for (int i = 0; i < 5; ++i) h.hand[i] = g_lookHand[i];
+    h.nameLen = (coop::u16)name.size();
+    h.raceLen = (coop::u16)race.size();
+    h.dataLen = (coop::u32)data.size();
+    g_net.queueCharLook(h, name, race, data);
+    char b[192];
+    _snprintf(b, sizeof(b) - 1, "[look] sent my character to the host: name='%s' race='%s' bytes=%u",
+              name.c_str(), race.c_str(), (unsigned)data.size());
+    b[sizeof(b) - 1] = '\0';
+    coopLog(b);
+}
+
+// Host: a player's edited character. Only their own squad may be changed.
+void applyLook(GameWorld* gw, const coop::InboundCharLook& cl) {
+    std::map<coop::u32, std::string>::const_iterator nm = g_names.find(cl.senderId);
+    char sq[64];
+    sq[0] = '\0';
+    coop::engine::getSquadNameByHand(cl.hdr.hand, sq, sizeof(sq));
+    // Real sessions name each player's squad after them; scripted tests have no
+    // names, so there it is enough that the character is another player's.
+    bool theirs = realSession() ? (nm != g_names.end() && nm->second == sq)
+                                : g_repl.ownerClassForHand(cl.hdr.hand) == 2;
+    if (!theirs) {
+        char b[160];
+        _snprintf(b, sizeof(b) - 1, "[look] REFUSED player %u's look: character is in squad '%s', not theirs",
+                  (unsigned)cl.senderId, sq);
+        b[sizeof(b) - 1] = '\0';
+        coopLog(b);
+        return;
+    }
+    FILE* f = fopen(LOOK_IN_FILE, "wb");
+    if (!f) { coopErr("[look] cannot write the look file"); return; }
+    if (!cl.data.empty()) fwrite(&cl.data[0], 1, cl.data.size(), f);
+    fclose(f);
+    unsigned int hand[5];
+    for (int i = 0; i < 5; ++i) hand[i] = cl.hdr.hand[i];
+    bool ok = coop::engine::importCharacterLook(gw, hand, LOOK_IN_FILE, cl.name, cl.race);
+    char b[192];
+    _snprintf(b, sizeof(b) - 1, "[look] player %u's character: name='%s' race='%s' %s",
+              (unsigned)cl.senderId, cl.name.c_str(), cl.race.c_str(), ok ? "applied" : "FAILED");
+    b[sizeof(b) - 1] = '\0';
+    coopLog(b);
+    if (ok && g_cfg.saveSync) {
+        // Everyone reloads the saved world, so every client draws the new look.
+        g_bootReloadHost = true;
+        armConnectPush();
+    }
+}
+
+void tickLook(GameWorld* gw) {
+    std::deque<coop::InboundCharLook> got;
+    g_inbound.drainCharLooks(got);
+    for (std::deque<coop::InboundCharLook>::iterator it = got.begin(); it != got.end(); ++it) {
+        if (it->hdr.kind == coop::CHAR_LOOK_OFFER && !g_cfg.isHost &&
+            it->hdr.target == g_net.localId()) {
+            g_lookWanted = true;
+            g_lookWantTick = GetTickCount();
+            coopLog("[look] the host offered the character editor");
+        } else if (it->hdr.kind == coop::CHAR_LOOK_APPLY && g_cfg.isHost && gw) {
+            applyLook(gw, *it);
+        }
+    }
+    if (!gw || !g_gameStarted || !coop::engine::gameplayLive(gw)) return;
+    DWORD now = GetTickCount();
+    // Test lever (KENSHICOOP_LOOK_TEST=N): a join opens the editor N s into the
+    // game and closes it 4 s later, so the export -> send -> apply -> reload path
+    // runs without a mouse. Off by default.
+    static int lookTestS = -1;
+    static bool lookTestFired = false;
+    if (lookTestS < 0) {
+        const char* e = getenv("KENSHICOOP_LOOK_TEST");
+        lookTestS = (e && e[0]) ? atoi(e) : 0;
+    }
+    if (lookTestS > 0 && !g_cfg.isHost && g_peerPresent && !lookTestFired &&
+        now - g_gameStartTick >= (DWORD)lookTestS * 1000u) {
+        lookTestFired = true;
+        g_lookWanted = true;
+        g_lookWantTick = now - 3000;
+        coopLog("[look] TEST: opening the editor");
+    }
+    if (lookTestS > 0 && g_lookEditing && g_lookSeenOpen && now - g_lookOpenTick > 4000) {
+        coopLog("[look] TEST: closing the editor");
+        coop::engine::closeCharacterEditor(gw);
+    }
+    if (g_lookWanted && !g_lookEditing && now - g_lookWantTick >= 3000 &&
+        now - g_lastWorldResetTick >= 5000 && g_readyWait.empty()) {
+        g_lookWanted = false;
+        if (!myCharacterHand(gw, g_lookHand)) {
+            coopLog("[look] no character of mine found - editor not opened");
+        } else if (coop::engine::openCharacterEditor(gw, g_lookHand)) {
+            g_lookEditing = true; g_lookSeenOpen = false; g_lookOpenTick = now;
+            coopLog("[look] character editor opened");
+        } else {
+            coopErr("[look] character editor FAILED to open");
+        }
+    }
+    if (g_lookEditing) {
+        int st = coop::engine::characterEditorOpen(gw);
+        if (st == 1) g_lookSeenOpen = true;
+        if (st == 0 && g_lookSeenOpen) {
+            g_lookEditing = false;
+            coopLog("[look] character editor closed");
+            if (!g_cfg.isHost) {
+                if (g_peerPresent) sendLookApply(gw);
+            } else if (g_peerPresent && g_cfg.saveSync) {
+                // The host's own edit: reload everyone so they see it too.
+                g_bootReloadHost = true;
+                armConnectPush();
+            }
+        } else if (!g_lookSeenOpen && now - g_lookOpenTick > 5000) {
+            g_lookEditing = false;
+            coopErr("[look] character editor never opened - giving up");
+        }
+    }
 }
 
 // Drain peer connect/leave events and surface a single game-thread confirmation
@@ -1462,6 +1674,10 @@ void coopPanelDrive() {
         ostate = 0;
     }
     // Join: an action the host's settings refused just now says why.
+    if (g_lookEditing) {
+        detail = "Customize your character - close the editor when done";
+        ostate = 1;
+    }
     if (!g_modWarn.empty() && GetTickCount() - g_modWarnTick < MODWARN_BANNER_MS) {
         detail = g_modWarn.rbegin()->second;
         ostate = 1;
@@ -1560,6 +1776,8 @@ void coopPanelDrive() {
     ps.newGameMoney = NG_MONEY_TEXT[g_ngMoney];
     ps.newGameStats = NG_STATS_TEXT[g_ngStats];
     ps.onNewGameCycle = &onNewGameCycle;
+    ps.onEditLook  = (g_peerPresent && realSession()) ? &onEditLookRequest : 0;
+    ps.lookEditing = g_lookEditing;
     // Only the host pauses, and only on purpose (Space / panel button);
     // trade and dialogue windows no longer stop the game for everyone.
     coop::engine::setMultiplayerPauseRules(g_net.isRunning());
@@ -2431,6 +2649,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     KC_PERF(S_NET_EVENTS, tickPermissions());
     KC_PERF(S_NET_EVENTS, tickReady());
     KC_PERF(S_NET_EVENTS, tickModCheck());
+    KC_PERF(S_NET_EVENTS, tickLook(gw));
     KC_PERF(S_NET_EVENTS, tickRoster(gw));
 
     // Coordinated load (protocol 32): the JOIN never loads locally while a
@@ -2673,6 +2892,7 @@ void coopUiConnect(bool isHost, bool useSteam, unsigned long long peerId) {
 
     g_cfg.isHost    = isHost;
     g_cfg.transport = useSteam ? "steam" : "udp";
+    coop::logSetTag(isHost ? "HOST" : "JOIN"); // the startup tag guessed the role
     // Re-read the UDP endpoint (ip/port) from coop_config.json so editing it then
     // hitting Connect works without restarting the game. (It also picks up a
     // steamPeer if one is set for advanced/back-compat use.)
