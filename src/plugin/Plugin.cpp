@@ -2440,10 +2440,39 @@ void tickScenarioStart(GameWorld* gw) {
 // next tick's top on the reload edge).
 void trackMove(GameWorld* gw);   // KENSHICOOP_TRACK_MOVE route recorder (below)
 
+// While a player is in the character editor their squad cannot move or fight
+// back, so it is frozen and melee-proof (the away guards) until the editor
+// closes. Vitals are owner-authoritative, so guarding on the editing client is
+// what counts. Rebuilt every tick after applyTargets, like the away guards.
+void applyLookGuard(GameWorld* gw) {
+    static bool s_logged = false;
+    if (!g_lookEditing || !gw) { s_logged = false; return; }
+    coop::EntityState sq[64];
+    unsigned int n = coop::engine::captureSquad(gw, /*leaderOnly*/ false, sq, 64);
+    unsigned int guarded = 0;
+    for (unsigned int i = 0; i < n; ++i) {
+        if (sq[i].hContainer != g_lookHand[1] || sq[i].hContainerSerial != g_lookHand[2]) continue;
+        Character* c = coop::engine::resolveCharByHand(sq[i].hIndex, sq[i].hSerial, sq[i].hType,
+                                                       sq[i].hContainer, sq[i].hContainerSerial);
+        if (!c) continue;
+        coop::engine::addAiSuspend(c);
+        coop::engine::addDamageGuard(c);
+        ++guarded;
+    }
+    if (!s_logged) {
+        s_logged = true;
+        char b[96];
+        _snprintf(b, sizeof(b) - 1, "[look] guarding %u character(s) while the editor is open", guarded);
+        b[sizeof(b) - 1] = '\0';
+        coopLog(b);
+    }
+}
+
 void tickReplicateApply(GameWorld* gw, bool worldLive) {
     if (worldLive && coop::engine::gameplayLive(gw)) {
         KC_PERF(S_APPLY_TARGETS, g_repl.applyTargets(gw));
         applyAwayGuards(gw); // after applyTargets rebuilt the suspend/guard sets
+        applyLookGuard(gw);
         // Phase W2: relocate our own copy of any DROPPED weapon to the ground BEFORE the
         // inventory reconcile runs, so the conservation move beats the (debounced) removal
         // reconcile that would otherwise DESTROY the weapon we cannot refabricate.
