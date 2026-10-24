@@ -12,6 +12,7 @@
 
 #include "EngineInternal.h"
 #include <kenshi/RaceData.h> // Character::myRace->data (character editor, v60)
+#include <kenshi/gui/ForgottenGUI.h> // ForgottenGUI::closeCharacterEditor
 
 namespace coop {
 namespace engine {
@@ -183,17 +184,24 @@ int characterEditorOpen(GameWorld* gw) {
 }
 
 typedef void (__fastcall* SetEditModeFn)(PlayerInterface* self, bool on);
-static SetEditModeFn g_setEditModeFn = 0;
+typedef void (__fastcall* GuiCloseEditorFn)(ForgottenGUI* self);
+static SetEditModeFn    g_setEditModeFn = 0;
+static GuiCloseEditorFn g_guiCloseEditorFn = 0;
+// Close the editor the way its own buttons do: the WINDOW first (the flag alone
+// left the editor up and the game in edit mode, so a pending load never ran),
+// then the edit-mode flag.
 bool closeCharacterEditor(GameWorld* gw) {
     if (!gw) return false;
     if (!g_setEditModeFn)
         g_setEditModeFn = (SetEditModeFn)KenshiLib::GetRealAddress(&PlayerInterface::setCharacterEditMode);
-    if (!g_setEditModeFn) return false;
+    if (!g_guiCloseEditorFn)
+        g_guiCloseEditorFn = (GuiCloseEditorFn)KenshiLib::GetRealAddress(&ForgottenGUI::closeCharacterEditor);
+    bool ok = false;
     __try {
-        if (!gw->player) return false;
-        g_setEditModeFn(gw->player, false);
-        return true;
+        if (g_guiCloseEditorFn && ::gui) { g_guiCloseEditorFn(::gui); ok = true; }
+        if (g_setEditModeFn && gw->player) { g_setEditModeFn(gw->player, false); ok = true; }
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    return ok;
 }
 
 // Raw reads/writes: no C++ objects in these frames.

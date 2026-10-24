@@ -358,6 +358,7 @@ bool          g_lookSeenOpen = false;
 DWORD         g_lookOpenTick = 0;
 unsigned int  g_lookHand[5]  = { 0, 0, 0, 0, 0 };
 DWORD         g_lastWorldResetTick = 0;
+DWORD         g_lookAwaitReload = 0;      // != 0: closed for a reload at this tick; reopen only after it
 const char*   LOOK_OUT_FILE  = "KenshiCoop_look_out.tmp";
 const char*   LOOK_IN_FILE   = "KenshiCoop_look_in.tmp";
 
@@ -385,6 +386,21 @@ void offerLookIfPending(coop::u32 playerId) {
     sendLookOffer(playerId);
 }
 
+// Kenshi does not run a load while its character editor is open, so a GO that
+// arrives mid-edit would leave this client on the old world (and the host waiting
+// for it). Close the editor first - quietly, nothing is sent - and reopen it once
+// the new world has settled.
+bool closeEditorForLoad() {
+    if (!g_lookEditing) return false;
+    g_lookEditing = false;
+    g_lookWanted = true;
+    g_lookWantTick = GetTickCount();
+    g_lookAwaitReload = GetTickCount();
+    if (g_lastGw) coop::engine::closeCharacterEditor(g_lastGw);
+    coopLog("[look] world reload: editor closed, it reopens after loading");
+    return true;
+}
+
 void onEditLookRequest() {
     if (g_lookEditing) return;
     g_lookWanted = true;
@@ -398,6 +414,11 @@ void onEditLookRequest() {
 // has loaded that world and is back in gameplay - a player still on the loading
 // screen no longer falls behind a running world. READY_TIMEOUT_MS bounds it.
 std::set<coop::u32> g_readyWait;
+// Players still loading when the wait timed out. Their client is on the OLD
+// world, so its rows name characters this world does not have - read as new
+// bodies they became ghost copies at the origin (a "Nameless" tab). Their rows
+// are ignored until they report the current GO loaded.
+std::set<coop::u32> g_lateLoaders;
 coop::u32           g_readyLoadId = 0;
 DWORD               g_readyStart  = 0;
 const DWORD         READY_TIMEOUT_MS = 90000;
@@ -436,6 +457,15 @@ void tickReady() {
     g_inbound.drainLoadReadys(got);
     if (!g_cfg.isHost) return;
     for (std::deque<coop::InboundLoadReady>::iterator it = got.begin(); it != got.end(); ++it) {
+        if (it->pkt.loadId == g_readyLoadId && g_lateLoaders.erase(it->ownerId)) {
+            g_repl.playerJoined(it->ownerId); // their rows are about this world again
+            char lb[96];
+            _snprintf(lb, sizeof(lb) - 1, "[ready] player %u loaded late - listening to them again",
+                      (unsigned)it->ownerId);
+            lb[sizeof(lb) - 1] = '\0'; coopLog(lb);
+            offerLookIfPending(it->ownerId);
+            continue;
+        }
         if (it->pkt.loadId != g_readyLoadId || !g_readyWait.erase(it->ownerId)) continue;
         char b[96];
         _snprintf(b, sizeof(b) - 1, "[ready] player %u loaded (%u still loading)",
@@ -454,7 +484,15 @@ void tickReady() {
                   (unsigned)g_readyWait.size());
         b[sizeof(b) - 1] = '\0';
         coopLog(b);
+        for (std::set<coop::u32>::iterator lt = g_readyWait.begin(); lt != g_readyWait.end(); ++lt) {
+            g_lateLoaders.insert(*lt);
+            g_repl.forgetPlayer(g_lastGw, *lt, false); // mute their old-world rows
+        }
         g_readyWait.clear();
+    }
+    // A late loader who left is not waited for either.
+    for (std::set<coop::u32>::iterator lt = g_lateLoaders.begin(); lt != g_lateLoaders.end();) {
+        if (!g_peers.count(*lt)) g_lateLoaders.erase(lt++); else ++lt;
     }
     static bool s_held = false;
     bool hold = !g_readyWait.empty();
@@ -928,6 +966,7 @@ void sessionResetForWorldReload() {
     // exists: drop it (an unfinished offer is kept and reopens on the new world).
     if (g_lookEditing) { g_lookEditing = false; g_lookWanted = true; g_lookWantTick = GetTickCount(); }
     g_lastWorldResetTick = GetTickCount();
+    g_lookAwaitReload = 0; // the new world is here; a waiting editor may reopen
 }
 
 // Push-save-on-connect (host): bake a fresh save of the live world and arm the
@@ -1079,7 +1118,10 @@ void tickLook(GameWorld* gw) {
         coopLog("[look] TEST: closing the editor");
         coop::engine::closeCharacterEditor(gw);
     }
-    if (g_lookWanted && !g_lookEditing && now - g_lookWantTick >= 3000 &&
+    // Closed for a reload: wait for that reload's world (60 s backstop), or the
+    // reopened editor blocks the very load it made way for.
+    if (g_lookAwaitReload != 0 && now - g_lookAwaitReload > 60000) g_lookAwaitReload = 0;
+    if (g_lookWanted && !g_lookEditing && g_lookAwaitReload == 0 && now - g_lookWantTick >= 3000 &&
         now - g_lastWorldResetTick >= 5000 && g_readyWait.empty()) {
         g_lookWanted = false;
         if (!myCharacterHand(gw, g_lookHand)) {
@@ -1232,6 +1274,15 @@ void onReportRequest() {
             fprintf(f, "player %u: %s%s\n", (unsigned)it->first, it->second.c_str(),
                     it->first == g_net.localId() ? " (you)" :
                     (it->first == 0 || g_peers.count(it->first)) ? "" : " (not connected)");
+        // Memory: every load crash in our own tests (2026-10-22..24) matched a
+        // Windows low-virtual-memory event - Kenshi needs 4-5 GB per instance.
+        MEMORYSTATUSEX ms;
+        ms.dwLength = sizeof(ms);
+        if (GlobalMemoryStatusEx(&ms))
+            fprintf(f, "memory: RAM %.1f GB (%.1f free), commit %.1f GB (%.1f free), load %lu%%\n",
+                    ms.ullTotalPhys / 1073741824.0, ms.ullAvailPhys / 1073741824.0,
+                    ms.ullTotalPageFile / 1073741824.0, ms.ullAvailPageFile / 1073741824.0,
+                    (unsigned long)ms.dwMemoryLoad);
         fprintf(f, "\nWhat happened (write it here before sending):\n\n");
         fclose(f);
         ++copied;
@@ -1675,9 +1726,29 @@ void driveLoadSync(GameWorld* gw) {
         // LOAD_GOs: verify our on-disk copy and follow the host.
         std::deque<coop::InboundLoadGo> gos;
         g_inbound.drainLoadGos(gos);
+        // A GO that found the character editor open is held for a moment: the
+        // engine refuses a load while edit mode is on, and closing it only takes
+        // effect on a later frame - loading in the same tick was silently dropped
+        // (the join stayed on the old world and the host waited out its timeout).
+        static std::deque<coop::InboundLoadGo> s_heldGos;
+        static DWORD s_heldTick = 0;
+        if (!s_heldGos.empty()) {
+            if (GetTickCount() - s_heldTick >= 2000) {
+                gos.insert(gos.begin(), s_heldGos.begin(), s_heldGos.end());
+                s_heldGos.clear();
+            } else {
+                s_heldGos.insert(s_heldGos.end(), gos.begin(), gos.end());
+                gos.clear();
+            }
+        }
         for (std::deque<coop::InboundLoadGo>::iterator it = gos.begin();
              it != gos.end(); ++it) {
             if (it->pkt.loadId <= g_loadIdSeen) continue; // stale/duplicate
+            if (closeEditorForLoad()) {
+                s_heldGos.insert(s_heldGos.end(), it, gos.end());
+                s_heldTick = GetTickCount();
+                break;
+            }
             g_loadIdSeen = it->pkt.loadId;
             char name[sizeof(it->pkt.name) + 1];
             memcpy(name, it->pkt.name, sizeof(it->pkt.name));
