@@ -1983,8 +1983,18 @@ private:
     struct DoorRow {
         int knownOpen; int knownLocked; unsigned long lastSendMs;
         u32 seqSeen; bool seeded;
+        // 3-4 players (2026-10-24): every sender numbers its own rows, so the
+        // stale/dup gate is per sender - one shared seqSeen let the host's high
+        // numbers swallow a join's genuine door change.
+        std::map<u32, u32> seqBy;
+        // A remote row for a door not loaded here: hold the wanted state and
+        // apply it when the door comes into range, instead of later reading our
+        // stale copy as a local change and broadcasting it.
+        bool pending; int wantOpen; int wantLocked;
+        unsigned long localMs; // last local change we sent (a host refresh in flight must not undo it)
         DoorRow() : knownOpen(-1), knownLocked(-1), lastSendMs(0),
-                    seqSeen(0), seeded(false) {}
+                    seqSeen(0), seeded(false), pending(false), wantOpen(-1),
+                    wantLocked(-1), localMs(0) {}
     };
     std::map<Key, DoorRow> doorRows_;
     u32           doorSeqOut_;
@@ -2048,6 +2058,7 @@ private:
     struct BdoorRow {
         int knownOpen; int knownLocked; unsigned long lastSendMs;
         u32 seqSeen; bool seeded;
+        std::map<u32, u32> seqBy; // per-sender stale gate (see DoorRow)
         BdoorRow() : knownOpen(-1), knownLocked(-1), lastSendMs(0),
                      seqSeen(0), seeded(false) {}
     };

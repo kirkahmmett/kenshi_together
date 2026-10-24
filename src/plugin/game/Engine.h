@@ -773,6 +773,10 @@ int createPlayerSquad(GameWorld* gw, const char* name);
 // Off by default in a session: taking only from your own characters; giving is
 // always allowed. Set on every client from the host's setting.
 void setTakeFromPlayers(bool allowed);
+// Control lock: while on, enforceOwnSelection (call once per tick) deselects any
+// selected squad member that belongs to another player. Returns how many.
+void setControlLock(bool on);
+unsigned int enforceOwnSelection(GameWorld* gw);
 // Record the game's main thread (call from the main loop). The inventory
 // detours pass calls from any other thread straight to the engine.
 void noteMainThread();

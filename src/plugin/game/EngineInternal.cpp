@@ -797,6 +797,52 @@ TryAddItemFn        g_tryAddItemOrig        = 0;
 bool g_invVetoSuspend = false;            // Replicator's own move in progress (extern)
 static bool           g_blockXfer   = false;
 static InvOwnerClassFn g_invOwnerClass = 0;
+
+// ---- Control lock (2026-10-24) ---------------------------------------------
+// Every squad tab is the player faction on every machine, so the engine lets
+// anyone select - and so order - anyone's characters, an away player's included.
+// Rather than detour each selection path (click, box, portrait, tab, select-all)
+// the plugin calls enforceOwnSelection once per tick: any selected squad member
+// the classifier calls ANOTHER player's (class 2) is deselected before an order
+// can be given. The host owns the away tabs, so it alone can still move them.
+typedef bool (__fastcall* IsObjSelectedFn)(PlayerInterface* self, RootObject* obj);
+typedef void (__fastcall* UnselectPcFn)(PlayerInterface* self, RootObject* obj);
+static IsObjSelectedFn g_isObjSelectedFn = 0;
+static UnselectPcFn    g_unselectPcFn    = 0;
+static bool            g_controlLock     = false;
+void setControlLock(bool on) { g_controlLock = on; }
+
+static unsigned int unselectOthersSeh(GameWorld* gw) {
+    unsigned int n = 0;
+    __try {
+        PlayerInterface* pi = gw->player;
+        if (!pi) return 0;
+        unsigned int size = (unsigned int)pi->playerCharacters.size();
+        for (unsigned int i = 0; i < size; ++i) {
+            Character* c = pi->playerCharacters[i];
+            if (!c || !g_isObjSelectedFn(pi, (RootObject*)c)) continue;
+            unsigned int h[5];
+            if (!readObjectHand((RootObject*)c, h)) continue;
+            if (g_invOwnerClass(h) != 2) continue;
+            g_unselectPcFn(pi, (RootObject*)c);
+            ++n;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return n;
+}
+
+static void notePermRefusal(int kind, const char* what);
+unsigned int enforceOwnSelection(GameWorld* gw) {
+    if (!g_controlLock || !gw || !g_invOwnerClass) return 0;
+    if (!g_isObjSelectedFn || !g_unselectPcFn) {
+        g_isObjSelectedFn = (IsObjSelectedFn)KenshiLib::GetRealAddress(&PlayerInterface::isObjectSelected);
+        g_unselectPcFn    = (UnselectPcFn)KenshiLib::GetRealAddress(&PlayerInterface::unselectPlayerCharacter);
+        if (!g_isObjSelectedFn || !g_unselectPcFn) return 0;
+    }
+    unsigned int n = unselectOthersSeh(gw);
+    if (n) notePermRefusal(5, "controlling another player's character");
+    return n;
+}
 static Inventory*     g_pendRemInv   = 0; // last remove's source inventory (main thread)
 static Item*          g_pendRemItem  = 0; // last item removed onto the cursor
 static unsigned int   g_pendRemOwnerHand[5] = { 0, 0, 0, 0, 0 }; // its owner-char hand
@@ -983,6 +1029,49 @@ bool __fastcall tryAddItem_hook(Inventory* self, Item* item, int quantity) {
     bool ok = g_tryAddItemOrig(self, item, quantity);
     g_pendRemItem = 0; g_pendRemInv = 0; g_havePendRemOwner = false;
     return ok;
+}
+
+// The take rule's second door (2026-10-24 field report: players still took from
+// each other in the trade window). Inventory::addItem(item, qty, dropOnFail,
+// destroyOnFail) is the engine's other add primitive - the trade window's
+// right-click auto-transfer (InventoryGUI::RClickAutoTrade) reaches the target
+// inventory through it rather than tryAddItem, so the drag rule never saw those
+// moves. Same verdict, narrower trigger: only while taking is off, only for an
+// add into one of OUR characters right after a remove from another inventory,
+// and only when that source is known - a refused move goes straight back to it,
+// never on the floor or into nothing.
+typedef bool (__fastcall* AddItem4Fn)(Inventory* self, Item* item, int quantity,
+                                      bool dropOnFail, bool destroyOnFail);
+AddItem4Fn g_addItem4Orig = 0;
+bool __fastcall addItem4_hook(Inventory* self, Item* item, int quantity,
+                              bool dropOnFail, bool destroyOnFail) {
+    if (offMainThread() || g_permTake || g_invVetoSuspend || !g_invOwnerClass ||
+        !self || !item || !g_pendRemInv || g_pendRemInv == self)
+        return g_addItem4Orig(self, item, quantity, dropOnFail, destroyOnFail);
+    bool refuse = false;
+    __try {
+        unsigned int dstHand[5] = { 0, 0, 0, 0, 0 };
+        unsigned int srcHand[5] = { 0, 0, 0, 0, 0 };
+        bool haveSrc = false;
+        if (g_havePendRemOwner) { memcpy(srcHand, g_pendRemOwnerHand, sizeof(srcHand)); haveSrc = true; }
+        if (!haveSrc) haveSrc = ownerHandOfInventory(g_pendRemInv, srcHand);
+        if (haveSrc && ownerHandOfInventory(self, dstHand) &&
+            g_invOwnerClass(srcHand) == 2 && g_invOwnerClass(dstHand) == 1)
+            refuse = true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { refuse = false; }
+    if (!refuse)
+        return g_addItem4Orig(self, item, quantity, dropOnFail, destroyOnFail);
+    notePermRefusal(4, "taking items from another player's character (trade window)");
+    bool restored = false;
+    Inventory* src = g_pendRemInv;
+    bool sav = g_invVetoSuspend; g_invVetoSuspend = true;
+    __try { restored = g_tryAddItemOrig(src, item, quantity); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { restored = false; }
+    g_invVetoSuspend = sav;
+    g_pendRemItem = 0; g_pendRemInv = 0; g_havePendRemOwner = false;
+    if (!restored) // could not hand it back: let the move happen rather than lose it
+        return g_addItem4Orig(self, item, quantity, dropOnFail, destroyOnFail);
+    return true; // handled: the item is back with its owner
 }
 
 // ---- Phase W1b: query-free ground-drop capture -----------------------------
@@ -2370,8 +2459,17 @@ bool installXferBlockHook() {
     if (KenshiLib::AddHook(addRem, (void*)&removeDontDestroy_hook,
                            (void**)&g_removeDontDestroyOrig) != KenshiLib::SUCCESS)
         return false;
-    return KenshiLib::AddHook(addAdd, (void*)&tryAddItem_hook,
-                              (void**)&g_tryAddItemOrig) == KenshiLib::SUCCESS;
+    if (KenshiLib::AddHook(addAdd, (void*)&tryAddItem_hook,
+                           (void**)&g_tryAddItemOrig) != KenshiLib::SUCCESS)
+        return false;
+    // The trade window's add path (take rule). Optional: without it the drag
+    // rule still holds, so a failure is logged, not fatal.
+    intptr_t add4 = KenshiLib::GetRealAddress(
+        static_cast<bool (Inventory::*)(Item*, int, bool, bool)>(&Inventory::_NV_addItem));
+    if (!add4 || KenshiLib::AddHook(add4, (void*)&addItem4_hook,
+                                    (void**)&g_addItem4Orig) != KenshiLib::SUCCESS)
+        coop::logLine("[xfer] addItem(4) detour NOT installed - trade-window takes unguarded");
+    return true;
 }
 
 void setBlockXfer(bool on)                    { g_blockXfer = on; }

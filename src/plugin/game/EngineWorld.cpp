@@ -437,8 +437,29 @@ unsigned int enumDoorsNear(GameWorld* gw, float radius, DoorRead* out, unsigned 
     if (!gw || !out || maxOut == 0 || !g_getObjsFn || !g_doorIsOpenFn) return 0;
     unsigned int n = 0;
     __try {
-        Ogre::Vector3 centers[4];
-        unsigned int nc = interestCenters(gw, centers);
+        // One center per player squad (all of them). interestCenters stops at
+        // two squads - right for the NPC stream's budget, wrong here: with 3-4
+        // players the third and fourth never had their doors scanned, so a door
+        // they opened reached nobody.
+        const unsigned int MAX_CENTERS = 8;
+        Ogre::Vector3 centers[MAX_CENTERS];
+        unsigned int nc = 0;
+        unsigned int seenC[MAX_CENTERS][2];
+        PlayerInterface* pl = gw->player;
+        unsigned int total0 = pl ? (unsigned int)pl->playerCharacters.size() : 0;
+        for (unsigned int i = 0; i < total0 && nc < MAX_CENTERS; ++i) {
+            Character* m = pl->playerCharacters[i];
+            if (!m) continue;
+            unsigned int h[5];
+            if (!readObjectHand(static_cast<RootObject*>(m), h)) continue;
+            bool seen = false;
+            for (unsigned int k = 0; k < nc; ++k)
+                if (seenC[k][0] == h[1] && seenC[k][1] == h[2]) { seen = true; break; }
+            if (seen) continue;
+            seenC[nc][0] = h[1]; seenC[nc][1] = h[2];
+            centers[nc] = m->getPosition();
+            ++nc;
+        }
         if (nc == 0) return 0;
         for (unsigned int ci = 0; ci < nc; ++ci) {
             g_npcQuery.clear();

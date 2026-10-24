@@ -1477,6 +1477,8 @@ void coopPanelDrive() {
     if (g_permNoticeTick != 0 && GetTickCount() - g_permNoticeTick < PERM_NOTICE_MS) {
         if (g_permNoticeKind == 4)
             detail = "You can only take items from your own characters";
+        else if (g_permNoticeKind == 5)
+            detail = "You can only control your own characters";
         else if (!g_cfg.isHost)
             detail = std::string("The host has turned off ") +
                      (g_permNoticeKind == 1 ? "building" :
@@ -2423,6 +2425,9 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     }
 
     KC_PERF(S_NET_EVENTS, processNetEvents(gw));
+    // Control lock: in a real session nobody orders another player's characters.
+    coop::engine::setControlLock(g_peerPresent && realSession());
+    if (gw && g_peerPresent && realSession()) coop::engine::enforceOwnSelection(gw);
     KC_PERF(S_NET_EVENTS, tickPermissions());
     KC_PERF(S_NET_EVENTS, tickReady());
     KC_PERF(S_NET_EVENTS, tickModCheck());

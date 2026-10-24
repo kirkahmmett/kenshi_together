@@ -814,19 +814,40 @@ void Replicator::publishDoors(const SyncContext& ctx) {
         Key k; k.t = r.hand[0]; k.c = r.hand[1]; k.cs = r.hand[2];
         k.i = r.hand[3]; k.s = r.hand[4];
         DoorRow& dr = doorRows_[k];
-        if (!dr.seeded) {
-            // Both clients load the same save, so the baseline is shared: seed
-            // silently and stream only genuine mid-session movement.
-            dr.seeded = true; dr.knownOpen = r.open; dr.knownLocked = r.locked;
+        if (dr.pending) {
+            // A remote state arrived while this door was out of range: it is the
+            // truth, not our stale copy - apply it now and do not echo it.
+            dr.pending = false;
+            bool lockMoves = r.hasLock && dr.wantLocked >= 0 && r.locked != dr.wantLocked;
+            if (r.open != dr.wantOpen || lockMoves) {
+                bool ok = engine::writeDoorByHand(r.hand, dr.wantOpen,
+                                                  r.hasLock ? dr.wantLocked : -1, 0);
+                char b[160];
+                _snprintf(b, sizeof(b) - 1,
+                          "[door] LATE-APPLY hand=%u.%u.%u.%u.%u open=%d locked=%d was=%d/%d ok=%d",
+                          r.hand[0], r.hand[1], r.hand[2], r.hand[3], r.hand[4],
+                          dr.wantOpen, dr.wantLocked, r.open, r.locked, ok ? 1 : 0);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+            dr.seeded = true; dr.knownOpen = dr.wantOpen; dr.knownLocked = dr.wantLocked;
             continue;
         }
+        if (!dr.seeded) {
+            // Both clients load the same save, so the baseline is usually shared:
+            // a join seeds silently and streams only genuine movement. The HOST
+            // also offers its seeded rows (resendUnsent below), so a door that is
+            // already different on a join - it moved while that join was away,
+            // or before it joined - converges instead of staying split.
+            dr.seeded = true; dr.knownOpen = r.open; dr.knownLocked = r.locked;
+            if (!ctx.isHost) continue;
+        }
         bool changed = (r.open != dr.knownOpen) || (r.locked != dr.knownLocked);
-        // Doors seed their baseline silently above, so a never-sent row holds
-        // (resendUnsent = false); only a real change or a post-send safety
-        // resend crosses. No burst throttle - the 1 Hz sample gate paces it.
+        // Only a real change, the host's first offer of a row, or the post-send
+        // safety resend crosses. No burst throttle - the 1 Hz sample gate paces it.
         if (!sync::gateShouldSend(changed, now, dr.lastSendMs, /*minSendMs*/ 0,
-                                  RESEND_MS, /*resendUnsent*/ false))
+                                  RESEND_MS, /*resendUnsent*/ ctx.isHost))
             continue;
+        if (changed) dr.localMs = now;
         dr.knownOpen = r.open; dr.knownLocked = r.locked; dr.lastSendMs = now;
         DoorPacket pkt;
         memset(&pkt, 0, sizeof(pkt));
@@ -859,15 +880,23 @@ void Replicator::applyDoors(const SyncContext& ctx) {
         Key k; k.t = p.hand[0]; k.c = p.hand[1]; k.cs = p.hand[2];
         k.i = p.hand[3]; k.s = p.hand[4];
         DoorRow& dr = doorRows_[k];
-        if (!sync::gateSeqAccept(dr.seqSeen, p.seq)) continue; // stale/dup row
-        dr.seqSeen = p.seq;
+        u32& seen = dr.seqBy[p.ownerId];
+        if (!sync::gateSeqAccept(seen, p.seq)) continue; // stale/dup row (per sender)
+        seen = p.seq;
+        // We changed this door ourselves a moment ago: a row sent before our
+        // change reached its author must not undo it (our edge is on its way).
+        if (dr.localMs != 0 && (nowMs() - dr.localMs) < 2000) continue;
         // Updating the baseline FIRST is the echo guard: the local change this
         // write causes must not be re-detected as ours next sample.
         dr.knownOpen = (int)p.open; dr.knownLocked = (int)p.locked;
         dr.seeded = true;
         engine::DoorRead cur;
-        if (!engine::readDoorByHand(p.hand, &cur))
-            continue; // out-of-interest or runtime door - accepted edge
+        if (!engine::readDoorByHand(p.hand, &cur)) {
+            // Not loaded here: remember it and apply when it comes into range.
+            dr.pending = true; dr.wantOpen = (int)p.open; dr.wantLocked = (int)p.locked;
+            continue;
+        }
+        dr.pending = false;
         bool lockMoves = cur.hasLock && (cur.locked != (int)p.locked);
         if (cur.open == (int)p.open && !lockMoves)
             continue; // already converged (resend or echo)
@@ -1956,8 +1985,9 @@ void Replicator::applyBuildDoors(const SyncContext& ctx) {
                 localHand = pit->second.localHand;
         }
         BdoorRow& row = bdoorRows_[std::make_pair(k, (int)p.doorIndex)];
-        if (!sync::gateSeqAccept(row.seqSeen, p.seq)) continue; // stale/dup row
-        row.seqSeen = p.seq;
+        u32& seen = row.seqBy[p.ownerId];
+        if (!sync::gateSeqAccept(seen, p.seq)) continue; // stale/dup row (per sender)
+        seen = p.seq;
         // Updating the baseline FIRST is the echo guard: the local change this
         // write causes must not be re-detected as ours next sample.
         row.knownOpen = (int)p.open; row.knownLocked = (int)p.locked;
