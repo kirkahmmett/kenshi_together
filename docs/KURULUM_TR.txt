@@ -1,8 +1,8 @@
 Kenshi Together - Kurulum ve Oynama Rehberi (Türkçe)
 ================================================
 
-Bu paketi HER OYUNCU kurmalı ve herkes aynı zip'ten kurmalı; sürümler farklıysa
-bağlantı reddedilir. (Sürüm: PROVENANCE.json içinde "protocolVersion".)
+Bu paketi HER OYUNCU kurmalı ve herkes aynı sürümü kurmalı; sürümler farklıysa
+bağlantı reddedilir ve ekranda kimin hangi sürümü kurması gerektiği yazar.
 
 
 GEREKENLER
@@ -15,6 +15,11 @@ GEREKENLER
 
 KURULUM (her oyuncu)
 --------------------
+  En kolayı: "KenshiTogether-Setup-v<sürüm>.exe" dosyasına çift tıkla (Kenshi
+  KAPALI olsun). Zip açmaya gerek yok; kurulum penceresi açılır, aşağıdaki
+  3. adımdaki uyarılar burada da geçerli. Bitince pencereyi kapat.
+
+  Exe yerine zip ile:
   1. Zip'e sağ tıkla > Özellikler > "Engellemeyi kaldır" kutusu varsa işaretle >
      Tamam. Sonra zip'i bir klasöre çıkar.
   2. Kenshi KAPALI olsun.

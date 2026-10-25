@@ -250,6 +250,10 @@ $zip = Join-Path $repoRoot "dist\KenshiCoop-kit.zip"
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path (Join-Path $kitDir "*") -DestinationPath $zip
 
+# One double-click setup exe around the same kit (IExpress, built into Windows).
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "make_setup_exe.ps1") -Version $Version
+if ($LASTEXITCODE -ne 0) { throw "make_setup_exe.ps1 failed ($LASTEXITCODE)" }
+
 Write-Host ""
 Write-Host "Mod folder: $modDir"
 Write-Host "Kit zipped: $zip"
