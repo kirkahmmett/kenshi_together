@@ -187,6 +187,12 @@ unsigned int listPlayerChars(GameWorld* gw, Character** out, unsigned int maxOut
 // Camera-anchored interest lever (spike 35): purely local read; the join
 // forwards its value to the host at ~1Hz via PKT_CAM_HINT.
 bool cameraCenter(GameWorld* gw, float out[3]);
+// Shared pings (v64): the terrain point under the mouse (UtilityT::getMouseRay
+// marched against the terrain height), else the camera center. *underMouse says
+// which one answered.
+bool pingPoint(GameWorld* gw, float out[3], bool* underMouse);
+// A floating label pinned to a world point (destroy with markerDestroy).
+void* pingLabelCreate(const char* text, float x, float y, float z);
 
 // SEH-guarded: point the LOCAL camera at a character (the engine's own
 // focusCameraOnObject - select-and-look-at, and it keeps following).

@@ -314,6 +314,7 @@ void NetLink::queueResyncReq(const ResyncReqPacket& pkt) { pushLocked(outCs_, ou
 void NetLink::queueTradeReq(const TradeReqPacket& pkt) { pushLocked(outCs_, outTradeReq_, pkt); }
 void NetLink::queueTradeResp(const TradeRespPacket& pkt) { pushLocked(outCs_, outTradeResp_, pkt); }
 void NetLink::queueShopTake(const ShopTakePacket& pkt) { pushLocked(outCs_, outShopTake_, pkt); }
+void NetLink::queuePing(const PingPacket& pkt) { pushLocked(outCs_, outPing_, pkt); }
 void NetLink::queueCharLook(const CharLookHeader& hdr, const std::string& name,
                             const std::string& race, const std::vector<u8>& data) {
     std::vector<u8> pk(sizeof(CharLookHeader));
@@ -349,7 +350,7 @@ static bool relayToJoins(u8 type) {
         case PKT_BUILD_DOOR: case PKT_BUILD_REMOVE: case PKT_NPC_CENSUS:
         case PKT_INV_XFER: case PKT_WORLD_ITEM_CLAIM: case PKT_CELL_CLAIM:
         case PKT_INV_XFER_ACK: case PKT_DEED: case PKT_FIXTURE:
-        case PKT_TRADE_REQ: case PKT_TRADE_RESP:
+        case PKT_TRADE_REQ: case PKT_TRADE_RESP: case PKT_PING:
             return true;
         default:
             return false;
@@ -1112,6 +1113,11 @@ void NetLink::threadLoop() {
                             && inbound_) {
                             inbound_->pushLoadReq(lr.ownerId, lr);
                         }
+                    } else if (type == PKT_PING) {
+                        // v64 shared ping (relayed to the other joins by the host).
+                        PingPacket pp;
+                        if (inbound_ && readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &pp))
+                            inbound_->pushPing(pp);
                     } else if (type == PKT_SHOP_TAKE) {
                         // v63: a join bought from a trader (host only).
                         ShopTakePacket sp;
@@ -2112,13 +2118,25 @@ void NetLink::threadLoop() {
         std::vector<TradeReqPacket>  tradeReqs;
         std::vector<TradeRespPacket> tradeResps;
         std::vector<ShopTakePacket>  shopTakes;
+        std::vector<PingPacket>      pings;
         EnterCriticalSection(&outCs_);
+        pings.swap(outPing_);
         shopTakes.swap(outShopTake_);
         charLooks.swap(outCharLook_);
         resyncReqs.swap(outResyncReq_);
         tradeReqs.swap(outTradeReq_);
         tradeResps.swap(outTradeResp_);
         LeaveCriticalSection(&outCs_);
+        for (size_t i = 0; i < pings.size(); ++i) {
+            ENetPacket* out = enet_packet_create(&pings[i], sizeof(PingPacket), ENET_PACKET_FLAG_RELIABLE);
+            if (isHost_) {
+                enet_host_broadcast(enetHost_, CH_RELIABLE, out);
+            } else if (serverPeer_ && serverPeer_->state == ENET_PEER_STATE_CONNECTED) {
+                enet_peer_send(serverPeer_, CH_RELIABLE, out);
+            } else {
+                enet_packet_destroy(out);
+            }
+        }
         for (size_t i = 0; i < shopTakes.size(); ++i) {
             if (isHost_ || !serverPeer_ || serverPeer_->state != ENET_PEER_STATE_CONNECTED) continue;
             enet_peer_send(serverPeer_, CH_RELIABLE,

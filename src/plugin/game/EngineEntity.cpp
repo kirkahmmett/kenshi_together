@@ -13,6 +13,8 @@
 // the API consumed by the PowerShell oracles (see resources/CODE_MAP.md).
 
 #include "EngineInternal.h"
+#include <kenshi/util/UtilityT.h> // UtilityT::getMouseRay (shared pings, v64)
+#include <OgreRay.h>
 
 // The co-op session panel + status overlay (the DatapanelGUI/Win32/clipboard
 // surface) moved to EngineUi.cpp in Phase 5e, taking its <kenshi/gui/...>,
@@ -668,6 +670,56 @@ bool cameraCenter(GameWorld* gw, float out[3]) {
         coop::logLine(b);
     }
     return true;
+}
+
+// ---- Shared pings (protocol 64) ---------------------------------------------
+// UtilityT::getMouseRay is static and returns Ogre::Ray by value; a typedef with
+// the identical C++ signature lets the compiler do the hidden-return ABI.
+typedef Ogre::Ray (*GetMouseRayFn)();
+static GetMouseRayFn g_mouseRayFn = 0;
+static bool mouseRaySeh(Ogre::Vector3* origin, Ogre::Vector3* dir) {
+    __try {
+        Ogre::Ray r = g_mouseRayFn();
+        *origin = r.getOrigin();
+        *dir = r.getDirection();
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+static bool terrainAt(float x, float z, float* h) {
+    __try { *h = g_terrainHeightFn(x, z); return true; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+bool pingPoint(GameWorld* gw, float out[3], bool* underMouse) {
+    if (underMouse) *underMouse = false;
+    if (!gw || !out) return false;
+    if (!g_mouseRayFn) g_mouseRayFn = (GetMouseRayFn)KenshiLib::GetRealAddress(&UtilityT::getMouseRay);
+    Ogre::Vector3 o, d;
+    if (g_mouseRayFn && g_terrainHeightFn && mouseRaySeh(&o, &d) && d.y < -0.01f) {
+        // March down the ray until it passes below the terrain, then bisect.
+        const float STEP = 10.0f, MAXT = 20000.0f;
+        float prevT = 0.0f;
+        for (float t = STEP; t <= MAXT; t += STEP) {
+            Ogre::Vector3 p = o + d * t;
+            float h = 0.0f;
+            if (!terrainAt(p.x, p.z, &h)) break;
+            if (p.y <= h) {
+                float lo = prevT, hi = t;
+                for (int i = 0; i < 12; ++i) {
+                    float mid = (lo + hi) * 0.5f;
+                    Ogre::Vector3 q = o + d * mid;
+                    float hq = 0.0f;
+                    if (!terrainAt(q.x, q.z, &hq)) break;
+                    if (q.y <= hq) hi = mid; else lo = mid;
+                }
+                Ogre::Vector3 hit = o + d * hi;
+                out[0] = hit.x; out[1] = hit.y; out[2] = hit.z;
+                if (underMouse) *underMouse = true;
+                return true;
+            }
+            prevT = t;
+        }
+    }
+    return cameraCenter(gw, out);
 }
 
 bool cameraFocusOn(GameWorld* gw, Character* c) {

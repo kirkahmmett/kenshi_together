@@ -107,6 +107,9 @@ struct CoopPanelState {
     int                tradeCount;
     const char*        tradeText[4];
     void               (*onTradeAnswer)(int index, bool accept);
+    // Shared pings (v64): "Ping where I look" (null = hidden); pingKey names the hotkey.
+    void               (*onPing)();
+    const char*        pingKey;
 };
 // The panel's role/transport selections at the moment Connect is hit. peerId is the
 // Steam ID pasted in-panel this session (0 if none), and overrides the config

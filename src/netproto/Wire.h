@@ -25,7 +25,7 @@ typedef double         f64;
 // this header stays a definition file. When you bump PROTOCOL_VERSION, add the
 // matching entry at the bottom of that doc. The version is checked at handshake
 // and a mismatch is rejected (no back-compat).
-const u16 PROTOCOL_VERSION = 63;
+const u16 PROTOCOL_VERSION = 64;
 
 // Packet type tags (first byte of every packet).
 enum PacketType {
@@ -85,7 +85,8 @@ enum PacketType {
     PKT_RESYNC_REQ       = 54,// RELIABLE a join asks the host to resync everyone (v61); ResyncReqPacket
     PKT_TRADE_REQ        = 55,// RELIABLE "may I have this item?" to its owner (v62); TradeReqPacket
     PKT_TRADE_RESP       = 56,// RELIABLE the owner's answer (v62); TradeRespPacket
-    PKT_SHOP_TAKE        = 57 // RELIABLE a join bought from a trader (v63); ShopTakePacket
+    PKT_SHOP_TAKE        = 57,// RELIABLE a join bought from a trader (v63); ShopTakePacket
+    PKT_PING             = 58 // RELIABLE "look here" - a world point marked by a player (v64); PingPacket
 };
 
 // One-shot transition events carried on the RELIABLE channel. Continuous state
@@ -1678,6 +1679,16 @@ struct TradeReqPacket {
 // happens locally (item + money, the money via the wallet pool) and is then
 // reported here so the host takes the same units out of its copy of the
 // trader - the next snapshot carries the lower stock to every join.
+// Protocol 64 (shared pings). Kenshi has no player map markers, so a player
+// marks a world point (under the mouse, else the camera center) and every
+// client shows a floating label with their name there for a while. Relayed by
+// the host like other join-authored state.
+struct PingPacket {
+    u8  type;     // = PKT_PING
+    u32 ownerId;  // who pinged
+    f32 x, y, z;  // world point
+};
+
 struct ShopTakePacket {
     u8   type;      // = PKT_SHOP_TAKE
     u32  ownerId;   // the buying join

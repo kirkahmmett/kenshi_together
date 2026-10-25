@@ -1393,6 +1393,109 @@ void answerTrade(size_t i, bool accept, bool expired) {
 
 void onTradeAnswer(int index, bool accept) { answerTrade((size_t)index, accept, false); }
 
+// ---- Shared pings (protocol 64) -----------------------------------------------
+// A player marks a world point (key, default G, or the panel button); every
+// client shows "[ name ]" there for PING_SHOW_MS. One label per player - a new
+// ping moves it.
+struct PingMark { void* label; DWORD until; };
+std::map<coop::u32, PingMark> g_pings;
+const DWORD PING_SHOW_MS = 30000;
+const DWORD PING_COOLDOWN_MS = 1000;
+DWORD g_pingSentTick = 0;
+int   g_pingVk = 0;
+char  g_pingKeyName[8] = { 0 };
+
+void initPingKey() {
+    if (g_pingVk) return;
+    const char* e = getenv("KENSHICOOP_PING_KEY");
+    char k = (e && e[0]) ? (char)toupper((unsigned char)e[0]) : 'G';
+    if (!((k >= 'A' && k <= 'Z') || (k >= '0' && k <= '9'))) k = 'G';
+    g_pingVk = (int)k;
+    g_pingKeyName[0] = k; g_pingKeyName[1] = '\0';
+}
+
+void showPing(coop::u32 owner, float x, float y, float z) {
+    std::map<coop::u32, PingMark>::iterator old = g_pings.find(owner);
+    if (old != g_pings.end()) { coop::engine::markerDestroy(old->second.label); g_pings.erase(old); }
+    // MyGUI reads '#' as the start of a colour code ("#RRGGBB"): escape it,
+    // or "Name #2" (a duplicate Steam name) renders as "Name".
+    std::string name = playerName(owner), safe;
+    for (size_t i = 0; i < name.size(); ++i) { safe += name[i]; if (name[i] == '#') safe += '#'; }
+    std::string text = "> " + safe;
+    void* l = coop::engine::pingLabelCreate(text.c_str(), x, y + 3.0f, z);
+    if (!l) return;
+    PingMark m; m.label = l; m.until = GetTickCount() + PING_SHOW_MS;
+    g_pings[owner] = m;
+}
+
+void onPingRequest() {
+    if (!g_lastGw || !g_peerPresent) return;
+    DWORD now = GetTickCount();
+    if (g_pingSentTick != 0 && now - g_pingSentTick < PING_COOLDOWN_MS) return;
+    float p[3];
+    bool mouse = false;
+    if (!coop::engine::pingPoint(g_lastGw, p, &mouse)) { uiNotice("Could not find a spot to ping"); return; }
+    g_pingSentTick = now;
+    coop::PingPacket pk;
+    memset(&pk, 0, sizeof(pk));
+    pk.type = (coop::u8)coop::PKT_PING;
+    pk.ownerId = g_net.localId();
+    pk.x = p[0]; pk.y = p[1]; pk.z = p[2];
+    g_net.queuePing(pk);
+    showPing(g_net.localId(), p[0], p[1], p[2]);
+    char b[128];
+    _snprintf(b, sizeof(b) - 1, "[ping] sent %s at %.0f,%.0f,%.0f", mouse ? "mouse point" : "camera center",
+              p[0], p[1], p[2]);
+    b[sizeof(b) - 1] = '\0'; coopLog(b);
+}
+
+void tickPing() {
+    initPingKey();
+    DWORD now = GetTickCount();
+    // A world reload drops the GUI's world labels with the old world.
+    static DWORD s_resetSeen = 0;
+    if (g_lastWorldResetTick != s_resetSeen) { s_resetSeen = g_lastWorldResetTick; g_pings.clear(); }
+    // Hotkey edge, only while Kenshi is the foreground window (GetAsyncKeyState
+    // is system-wide).
+    static bool s_down = false;
+    bool down = false;
+    if (g_peerPresent && g_gameStarted) {
+        HWND fg = GetForegroundWindow();
+        DWORD fgPid = 0;
+        if (fg) GetWindowThreadProcessId(fg, &fgPid);
+        down = fgPid == GetCurrentProcessId() && (GetAsyncKeyState(g_pingVk) & 0x8000) != 0;
+    }
+    if (down && !s_down) onPingRequest();
+    s_down = down;
+    // Test lever (KENSHICOOP_PING_TEST=N): a join pings N s into the game.
+    static int ptS = -1;
+    static bool ptFired = false;
+    if (ptS < 0) { const char* e = getenv("KENSHICOOP_PING_TEST"); ptS = (e && e[0]) ? atoi(e) : 0; }
+    if (ptS > 0 && !ptFired && !g_cfg.isHost && g_peerPresent && g_gameStarted &&
+        now - g_gameStartTick >= (DWORD)ptS * 1000u) {
+        ptFired = true;
+        coopLog("[ping] TEST: pinging");
+        onPingRequest();
+    }
+    std::deque<coop::PingPacket> got;
+    g_inbound.drainPings(got);
+    for (std::deque<coop::PingPacket>::iterator it = got.begin(); it != got.end(); ++it) {
+        if (it->ownerId == g_net.localId()) continue;
+        showPing(it->ownerId, it->x, it->y, it->z);
+        char b[128];
+        _snprintf(b, sizeof(b) - 1, "[ping] %s pinged %.0f,%.0f,%.0f label=%d", playerName(it->ownerId).c_str(),
+                  it->x, it->y, it->z, g_pings.count(it->ownerId) ? 1 : 0);
+        b[sizeof(b) - 1] = '\0'; coopLog(b);
+        uiNotice(playerName(it->ownerId) + " pinged a spot");
+    }
+    for (std::map<coop::u32, PingMark>::iterator it = g_pings.begin(); it != g_pings.end();) {
+        if ((long)(now - it->second.until) >= 0) {
+            coop::engine::markerDestroy(it->second.label);
+            g_pings.erase(it++);
+        } else ++it;
+    }
+}
+
 // ---- Trader sync (protocol 63) -------------------------------------------------
 // A join's purchase from a trader is reported to the host, which takes the same
 // units out of its copy of the trader (the stock it publishes to everyone).
@@ -2223,6 +2326,9 @@ void coopPanelDrive() {
         ++ps.tradeCount;
     }
     ps.onTradeAnswer = g_peerPresent ? &onTradeAnswer : 0;
+    initPingKey();
+    ps.onPing  = g_peerPresent ? &onPingRequest : 0;
+    ps.pingKey = g_pingKeyName;
     // Only the host pauses, and only on purpose (Space / panel button);
     // trade and dialogue windows no longer stop the game for everyone.
     coop::engine::setMultiplayerPauseRules(g_net.isRunning());
@@ -3127,6 +3233,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     KC_PERF(S_NET_EVENTS, tickResync());
     KC_PERF(S_NET_EVENTS, tickTrade(gw));
     KC_PERF(S_NET_EVENTS, tickShop());
+    KC_PERF(S_NET_EVENTS, tickPing());
     KC_PERF(S_NET_EVENTS, tickRoster(gw));
 
     // Coordinated load (protocol 32): the JOIN never loads locally while a

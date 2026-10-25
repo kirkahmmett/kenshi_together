@@ -140,6 +140,29 @@ bool markerUpdate(void* label, const char* text, int colorId) {
     return markerUpdateSeh((ScreenLabel*)label, &t, &col);
 }
 
+// A label pinned to a WORLD POINT (protocol 64 pings), not to a character.
+static ScreenLabel* pingLabelSeh(ForgottenGUI* g, const std::string* text,
+                                 const MyGUI::Colour* col, const Ogre::Vector3* pos) {
+    __try {
+        ScreenLabel* l = g->createScreenLabel(*text, *col, ScreenLabel::LS_SMALL,
+                                              ScreenLabel::RS_STOPPED);
+        if (l) {
+            l->_NV_setRisingSpeed(ScreenLabel::RS_STOPPED);
+            l->_NV_setPosition(*pos);
+        }
+        return l;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+}
+void* pingLabelCreate(const char* text, float x, float y, float z) {
+    if (!text) return 0;
+    ForgottenGUI* g = ::gui;
+    if (!g) return 0;
+    std::string t(text);
+    MyGUI::Colour col(0.35f, 0.90f, 1.00f, 1.0f); // cyan: not one of the debug marker colours
+    Ogre::Vector3 pos(x, y, z);
+    return pingLabelSeh(g, &t, &col, &pos);
+}
+
 void markerDestroy(void* label) {
     if (!label) return;
     ForgottenGUI* g = ::gui; // KenshiLib data export (spike 46)
@@ -410,6 +433,9 @@ void (*g_newGameCycleFn)(int) = 0;
 void (*g_editLookFn)() = 0;
 void (*g_resyncFn)() = 0;
 void (*g_tradeAnswerFn)(int, bool) = 0;
+void (*g_pingFn)() = 0;
+DataPanelLine* g_pingBtn = 0;
+void onPingBtn(DataPanelLine*) { if (g_pingFn) g_pingFn(); }
 DataPanelLine* g_tradeBtns[8] = { 0, 0, 0, 0, 0, 0, 0, 0 }; // [2i] accept, [2i+1] decline
 void onTradeBtn(DataPanelLine* line) {
     for (int i = 0; i < 8; ++i) {
@@ -647,6 +673,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
     g_editLookFn = st->onEditLook;
     g_resyncFn = st->onResync;
     g_tradeAnswerFn = st->onTradeAnswer;
+    g_pingFn = st->onPing;
     g_reportFn = st->onReport;
     g_pauseToggleFn = st->onPauseToggle;
     ForgottenGUI* g = ::gui; // KenshiLib data export (spike 46)
@@ -906,6 +933,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             g_newGameBtns[0] = 0; g_newGameBtns[1] = 0;
             g_editLookBtn = 0; g_resyncBtn = 0; g_reportBtn = 0;
             for (int i = 0; i < 8; ++i) g_tradeBtns[i] = 0;
+            g_pingBtn = 0;
 #define ROW(k, kk, vv, o) do { if (n < SIMPLE_ROWS_MAX) { keys[n] = (kk); vals[n] = (vv); \
             rows[n].kind = (k); rows[n].key = &keys[n]; rows[n].val = &vals[n]; \
             rows[n].out = (DataPanelLine**)(o); ++n; } } while (0)
@@ -965,6 +993,9 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                         ROW(1, kd, "        Decline", &g_tradeBtns[ti * 2 + 1]);
                     }
                 }
+                if (st->onPing)
+                    ROW(1, "ping", std::string("Ping where I look    (key ") + (st->pingKey ? st->pingKey : "?") + ")",
+                        &g_pingBtn);
                 if (st->onResync)
                     ROW(1, "resync", "Resync    (everyone reloads the host's world, ~10 s)", &g_resyncBtn);
                 if (st->onReport) ROW(1, "report", "Save a problem report (to your Desktop)", &g_reportBtn);
@@ -1027,6 +1058,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             if (g_resyncBtn) g_resyncBtn->callback = MyGUI::newDelegate(&onResyncBtn);
             for (int i = 0; i < 8; ++i)
                 if (g_tradeBtns[i]) g_tradeBtns[i]->callback = MyGUI::newDelegate(&onTradeBtn);
+            if (g_pingBtn) g_pingBtn->callback = MyGUI::newDelegate(&onPingBtn);
             if (g_reportBtn) g_reportBtn->callback = MyGUI::newDelegate(&onReportBtn);
             for (int i = 0; i < GAME_ROWS_MAX; ++i)
                 if (g_gameBtns[i]) g_gameBtns[i]->callback = MyGUI::newDelegate(&onGameBtn);

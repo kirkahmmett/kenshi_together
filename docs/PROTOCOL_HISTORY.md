@@ -125,3 +125,12 @@ build** after a bump.
   from a field session.
 - Not on the wire: the storage-container census (protocol 34) scans around
   every player squad, not just the first two (3-4 player sessions).
+
+## 64 - shared pings
+
+- `PKT_PING` (58) / `PingPacket` (17 bytes), relayed by the host: a player
+  marks a world point (key G - `KENSHICOOP_PING_KEY` - or the panel's "Ping
+  where I look"); every client shows "> name" there for 30 s. The point is the
+  terrain under the mouse (`UtilityT::getMouseRay` marched against the terrain
+  height), else the camera center. One label per player; 1 s cooldown.
+- Test lever `KENSHICOOP_PING_TEST=N`: a join pings N s into the game.
