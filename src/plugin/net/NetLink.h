@@ -151,6 +151,8 @@ public:
     void setLocalName(const std::string& name) { localName_ = name; }
     // Our enabled mod list fingerprint (v59 mod check). Call before start().
     void setLocalMods(u32 hash, u16 count) { modHash_ = hash; modCount_ = count; }
+    // Our kit version ("0.65.0"; mods\KenshiCoop\version.txt). Call before start().
+    void setKitVersion(const std::string& v) { kitVersion_ = v.substr(0, KIT_VERSION_MAX); }
     void queueBuildPlace(const BuildPlacePacket& pkt);
     void queueBuildState(const BuildStatePacket& pkt);
     void queueBuildDoor(const BuildDoorPacket& pkt);
@@ -345,6 +347,8 @@ private:
     std::vector<RosterPacket>    outRoster_;
     std::string                  localName_;
     u32                          modHash_;
+    std::string                  kitVersion_;
+    volatile bool                rejected_;   // join: the host refused our version - stop retrying
     u16                          modCount_;
     std::vector<BuildPlacePacket> outBuildPlace_;
     std::vector<BuildStatePacket> outBuildState_;

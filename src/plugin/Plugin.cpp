@@ -507,6 +507,21 @@ void tickReady() {
     g_repl.setSpeedHold(hold);
 }
 
+// Kit version ("0.65.0"): mods\KenshiCoop\version.txt, written by make_mod_kit.
+// A dev deploy has none - "dev".
+std::string kitVersion() {
+    static std::string v;
+    if (!v.empty()) return v;
+    FILE* f = fopen("mods\\KenshiCoop\\version.txt", "r");
+    char line[32];
+    line[0] = '\0';
+    if (f) { if (!fgets(line, sizeof(line), f)) line[0] = '\0'; fclose(f); }
+    size_t k = strlen(line);
+    while (k > 0 && (line[k - 1] == '\n' || line[k - 1] == '\r' || line[k - 1] == ' ')) line[--k] = '\0';
+    v = k ? line : "dev";
+    return v;
+}
+
 // ---- Mod list check (v59) ---------------------------------------------------
 // FNV-1a over data\mods.cfg's non-empty lines, lower-cased, in load order. Only
 // a warning: same-name mods of different versions still hash the same.
@@ -1447,6 +1462,16 @@ void onPingRequest() {
     _snprintf(b, sizeof(b) - 1, "[ping] sent %s at %.0f,%.0f,%.0f", mouse ? "mouse point" : "camera center",
               p[0], p[1], p[2]);
     b[sizeof(b) - 1] = '\0'; coopLog(b);
+}
+
+// Net-thread notices (v65: a player with another version tried to join).
+void tickNotices() {
+    std::deque<std::string> got;
+    g_inbound.drainNotices(got);
+    for (std::deque<std::string>::iterator it = got.begin(); it != got.end(); ++it) {
+        coopLog(("[notice] " + *it).c_str());
+        uiNotice(*it);
+    }
 }
 
 void tickPing() {
@@ -3316,6 +3341,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     KC_PERF(S_NET_EVENTS, tickTrade(gw));
     KC_PERF(S_NET_EVENTS, tickShop());
     KC_PERF(S_NET_EVENTS, tickPing());
+    KC_PERF(S_NET_EVENTS, tickNotices());
     KC_PERF(S_NET_EVENTS, tickSpeedVotes());
     KC_PERF(S_NET_EVENTS, tickRoster(gw));
 
@@ -3530,6 +3556,7 @@ void startNetworking() {
         coop::u32 mh = 0; coop::u16 mc = 0;
         readModList(&mh, &mc);
         g_net.setLocalMods(mh, mc);
+        g_net.setKitVersion(kitVersion());
         char b[80];
         _snprintf(b, sizeof(b) - 1, "[mods] %u enabled mod(s), list hash %08x", (unsigned)mc, (unsigned)mh);
         b[sizeof(b) - 1] = '\0';

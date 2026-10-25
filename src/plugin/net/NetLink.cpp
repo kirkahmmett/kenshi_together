@@ -101,7 +101,7 @@ NetLink::NetLink()
       sendEpoch_(0),
       steamPeer_(0),
       steamOpen_(false),
-      modHash_(0), modCount_(0),
+      modHash_(0), modCount_(0), rejected_(false),
       relayed_(0),
       simDelayMs_(0), simJitterMs_(0), simLossPct_(0) {
     InitializeCriticalSection(&outCs_);
@@ -467,6 +467,7 @@ void NetLink::threadLoop() {
     }
 
     DWORD lastConnectAttempt = GetTickCount();
+    rejected_ = false;
     // Join: did the current connection reach CONNECT / WELCOME? A host that
     // closes us between the two refused us (it rejects a protocol mismatch
     // right after HELLO); a connect that never reached CONNECT is unreachable.
@@ -545,7 +546,7 @@ void NetLink::threadLoop() {
 
         // Client reconnect: if we have no live connection, retry every 2 s so
         // dropping/relaunching the host re-establishes.
-        if (!isHost_) {
+        if (!isHost_ && !rejected_) {
             bool disconnected =
                 (serverPeer_ == 0) ||
                 (serverPeer_->state == ENET_PEER_STATE_DISCONNECTED) ||
@@ -583,17 +584,24 @@ void NetLink::threadLoop() {
                         linkUp = true; gotWelcome = false;
                         setLastErr("");
                         // Introduce ourselves: protocol version + display name.
-                        unsigned char hb[sizeof(HelloPacket) + ROSTER_NAME_MAX + 6];
+                        unsigned char hb[sizeof(HelloPacket) + ROSTER_NAME_MAX + 6 + 1 + KIT_VERSION_MAX];
                         HelloPacket h;
                         size_t nl = localName_.size();
                         if (nl > ROSTER_NAME_MAX) nl = ROSTER_NAME_MAX;
                         h.type = (u8)PKT_HELLO; h.version = PROTOCOL_VERSION; h.nameLen = (u8)nl;
+                        // Test lever: KENSHICOOP_FAKE_PROTOCOL=N announces protocol N (version-message test).
+                        { const char* fp = getenv("KENSHICOOP_FAKE_PROTOCOL"); if (fp && fp[0]) h.version = (u16)atoi(fp); }
                         std::memcpy(hb, &h, sizeof(h));
                         if (nl) std::memcpy(hb + sizeof(h), localName_.data(), nl);
                         // v59: our mod list fingerprint follows the name.
                         std::memcpy(hb + sizeof(h) + nl, &modHash_, 4);
                         std::memcpy(hb + sizeof(h) + nl + 4, &modCount_, 2);
-                        ENetPacket* out = enet_packet_create(hb, sizeof(h) + nl + 6,
+                        // v65: our kit version follows (u8 length + chars).
+                        size_t kl = kitVersion_.size();
+                        if (kl > KIT_VERSION_MAX) kl = KIT_VERSION_MAX;
+                        hb[sizeof(h) + nl + 6] = (unsigned char)kl;
+                        if (kl) std::memcpy(hb + sizeof(h) + nl + 7, kitVersion_.data(), kl);
+                        ENetPacket* out = enet_packet_create(hb, sizeof(h) + nl + 7 + kl,
                                                              ENET_PACKET_FLAG_RELIABLE);
                         enet_peer_send(ev.peer, CH_RELIABLE, out);
                         netLog("connected to host; sent HELLO");
@@ -606,13 +614,44 @@ void NetLink::threadLoop() {
                         HelloPacket h;
                         if (readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &h)) {
                             if (h.version != PROTOCOL_VERSION) {
-                                char b[128];
+                                // v65: read the join's kit version when its HELLO
+                                // has our layout (name, 6-byte mod print, kit).
+                                std::string theirKit = "an older version";
+                                {
+                                    unsigned len = (unsigned)ev.packet->dataLength;
+                                    unsigned nl2 = h.nameLen;
+                                    unsigned at = (unsigned)sizeof(HelloPacket) + nl2 + 6;
+                                    if (len > at) {
+                                        unsigned kl = ev.packet->data[at];
+                                        if (kl > 0 && kl <= KIT_VERSION_MAX && len >= at + 1 + kl)
+                                            theirKit.assign((const char*)ev.packet->data + at + 1, kl);
+                                    }
+                                }
+                                char b[192];
                                 _snprintf(b, sizeof(b) - 1,
-                                          "protocol mismatch: peer v%u, ours v%u; rejecting",
-                                          (unsigned)h.version, (unsigned)PROTOCOL_VERSION);
+                                          "protocol mismatch: peer v%u (%s), ours v%u (%s); rejecting",
+                                          (unsigned)h.version, theirKit.c_str(),
+                                          (unsigned)PROTOCOL_VERSION, kitVersion_.c_str());
                                 b[sizeof(b) - 1] = '\0';
                                 netErr(b);
-                                enet_peer_disconnect(ev.peer, 0);
+                                RejectPacket rj;
+                                std::memset(&rj, 0, sizeof(rj));
+                                rj.type = (u8)PKT_REJECT; rj.reason = REJECT_VERSION;
+                                rj.hostProtocol = PROTOCOL_VERSION;
+                                std::memcpy(rj.hostKit, kitVersion_.data(),
+                                            kitVersion_.size() < sizeof(rj.hostKit) ? kitVersion_.size()
+                                                                                    : sizeof(rj.hostKit) - 1);
+                                enet_peer_send(ev.peer, CH_RELIABLE,
+                                               enet_packet_create(&rj, sizeof(rj), ENET_PACKET_FLAG_RELIABLE));
+                                enet_peer_disconnect_later(ev.peer, 0); // after the reject is delivered
+                                if (inbound_) {
+                                    std::string who = "A player";
+                                    if (h.nameLen > 0 && ev.packet->dataLength >= sizeof(HelloPacket) + h.nameLen)
+                                        who.assign((const char*)ev.packet->data + sizeof(HelloPacket),
+                                                   h.nameLen > ROSTER_NAME_MAX ? ROSTER_NAME_MAX : h.nameLen);
+                                    inbound_->pushNotice(who + " has " + theirKit + " - they need " +
+                                                         kitVersion_ + " to join");
+                                }
                             } else {
                                 // Lowest free id (protocol 57): the id is the join's
                                 // squad-tab rank, so a player who reconnects gets
@@ -629,7 +668,13 @@ void NetLink::threadLoop() {
                                 }
                                 if (id >= MAX_PLAYER_ID) {
                                     netErr("session full; rejecting a player");
-                                    enet_peer_disconnect(ev.peer, 0);
+                                    RejectPacket rj;
+                                    std::memset(&rj, 0, sizeof(rj));
+                                    rj.type = (u8)PKT_REJECT; rj.reason = REJECT_FULL;
+                                    rj.hostProtocol = PROTOCOL_VERSION;
+                                    enet_peer_send(ev.peer, CH_RELIABLE,
+                                                   enet_packet_create(&rj, sizeof(rj), ENET_PACKET_FLAG_RELIABLE));
+                                    enet_peer_disconnect_later(ev.peer, 0);
                                     enet_packet_destroy(ev.packet);
                                     break;
                                 }
@@ -665,6 +710,27 @@ void NetLink::threadLoop() {
                                     inbound_->pushConnect(id);
                                 }
                             }
+                        }
+                    } else if (!isHost_ && type == PKT_REJECT) {
+                        // v65: the host says why it refused us.
+                        RejectPacket rj;
+                        if (readPacket(ev.packet->data, (unsigned)ev.packet->dataLength, &rj)) {
+                            rj.hostKit[sizeof(rj.hostKit) - 1] = 0;
+                            char b[256];
+                            if (rj.reason == REJECT_VERSION) {
+                                _snprintf(b, sizeof(b) - 1,
+                                          "Version mismatch: the host has Kenshi Together %s, you have %s - "
+                                          "install the host's version",
+                                          rj.hostKit[0] ? rj.hostKit : "(unknown)", kitVersion_.c_str());
+                                rejected_ = true; // retrying cannot help
+                            } else if (rj.reason == REJECT_FULL) {
+                                _snprintf(b, sizeof(b) - 1, "The session is full - try again when a player leaves");
+                            } else {
+                                _snprintf(b, sizeof(b) - 1, "The host refused the connection");
+                            }
+                            b[sizeof(b) - 1] = '\0';
+                            netErr(b);
+                            gotWelcome = true; // so the disconnect that follows keeps this message
                         }
                     } else if (!isHost_ && type == PKT_WELCOME) {
                         WelcomePacket w;
@@ -1269,9 +1335,11 @@ void NetLink::threadLoop() {
                         serverPeer_ = 0;
                         if (inbound_) inbound_->pushLeave(OWNER_ID_ALL);
                         netLog("disconnected from host");
-                        if (linkUp && !gotWelcome) {
+                        if (rejected_) {
+                            // The reject already said why; keep its message.
+                        } else if (linkUp && !gotWelcome) {
                             netErr("the host closed the connection before admitting us - "
-                                   "most likely a different KenshiCoop version");
+                                   "most likely a different Kenshi Together version");
                         } else if (!linkUp) {
                             // Unreachable: no log line (this repeats every retry);
                             // the panel shows it.

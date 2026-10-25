@@ -729,6 +729,13 @@ public:
         InboundLoadNack ln; ln.ownerId = ownerId; ln.pkt = pkt;
         EnterCriticalSection(&cs_); loadNack_.push_back(ln); LeaveCriticalSection(&cs_);
     }
+    // Short player-facing notices raised on the net thread (v65 rejects).
+    void pushNotice(const std::string& text) {
+        EnterCriticalSection(&cs_); notice_.push_back(text); LeaveCriticalSection(&cs_);
+    }
+    void drainNotices(std::deque<std::string>& out) {
+        EnterCriticalSection(&cs_); out.swap(notice_); LeaveCriticalSection(&cs_);
+    }
     void pushPing(const PingPacket& p) {
         EnterCriticalSection(&cs_); ping_.push_back(p); LeaveCriticalSection(&cs_);
     }
@@ -1042,6 +1049,7 @@ private:
     SessionQ<TradeRespPacket>      tradeResp_;
     SessionQ<ShopTakePacket>       shopTake_;   // v63: joins' purchases (host)
     SessionQ<PingPacket>           ping_;       // v64: shared pings
+    SessionQ<std::string>          notice_;     // v65: net-thread notices
     // SESSION-PRESERVING: the host's join permissions (protocol 56) are a
     // session setting, not world state - a world swap must not drop them.
     SessionQ<InboundPerms>         perms_;

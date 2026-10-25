@@ -25,7 +25,7 @@ typedef double         f64;
 // this header stays a definition file. When you bump PROTOCOL_VERSION, add the
 // matching entry at the bottom of that doc. The version is checked at handshake
 // and a mismatch is rejected (no back-compat).
-const u16 PROTOCOL_VERSION = 64;
+const u16 PROTOCOL_VERSION = 65;
 
 // Packet type tags (first byte of every packet).
 enum PacketType {
@@ -86,7 +86,8 @@ enum PacketType {
     PKT_TRADE_REQ        = 55,// RELIABLE "may I have this item?" to its owner (v62); TradeReqPacket
     PKT_TRADE_RESP       = 56,// RELIABLE the owner's answer (v62); TradeRespPacket
     PKT_SHOP_TAKE        = 57,// RELIABLE a join bought from a trader (v63); ShopTakePacket
-    PKT_PING             = 58 // RELIABLE "look here" - a world point marked by a player (v64); PingPacket
+    PKT_PING             = 58,// RELIABLE "look here" - a world point marked by a player (v64); PingPacket
+    PKT_REJECT           = 59 // RELIABLE why the host refused a join, sent before it disconnects (v65); RejectPacket
 };
 
 // One-shot transition events carried on the RELIABLE channel. Continuous state
@@ -1683,6 +1684,21 @@ struct TradeReqPacket {
 // marks a world point (under the mouse, else the camera center) and every
 // client shows a floating label with their name there for a while. Relayed by
 // the host like other join-authored state.
+// Protocol 65 (version message). A join appends its kit version to HELLO (after
+// the mod fingerprint: u8 length + chars). A host that refuses a join first
+// sends this, then disconnects it - the join can say exactly what to install.
+// FROZEN LAYOUT: every later version must still send and read it the same way,
+// or a mismatched pair could never explain itself again.
+const u8 REJECT_VERSION = 1; // protocol versions differ
+const u8 REJECT_FULL    = 2; // no free player slot
+const u8 KIT_VERSION_MAX = 15;
+struct RejectPacket {
+    u8   type;          // = PKT_REJECT
+    u8   reason;        // REJECT_*
+    u16  hostProtocol;  // the host's PROTOCOL_VERSION
+    char hostKit[16];   // the host's kit version ("0.65.0"), '\0'-padded
+};
+
 struct PingPacket {
     u8  type;     // = PKT_PING
     u32 ownerId;  // who pinged

@@ -134,3 +134,15 @@ build** after a bump.
   terrain under the mouse (`UtilityT::getMouseRay` marched against the terrain
   height), else the camera center. One label per player; 1 s cooldown.
 - Test lever `KENSHICOOP_PING_TEST=N`: a join pings N s into the game.
+
+## 65 - version message
+
+- `PKT_REJECT` (59) / `RejectPacket` (20 bytes, FROZEN layout): a host that
+  refuses a join (protocol mismatch, or the session is full) first sends why -
+  reason, its protocol and its kit version - then disconnects it
+  (`enet_peer_disconnect_later`). The join shows "Version mismatch: the host has
+  Kenshi Together X, you have Y - install the host's version" and stops
+  retrying; the host shows "<name> has Y - they need X to join".
+- HELLO carries the join's kit version after the mod fingerprint (u8 length +
+  chars). The kit writes `KenshiCoop\version.txt`; a dev deploy reports "dev".
+- Test lever `KENSHICOOP_FAKE_PROTOCOL=N`: the join announces protocol N.

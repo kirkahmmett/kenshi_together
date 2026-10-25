@@ -84,6 +84,9 @@ Write-Host "=== assembling KenshiCoop mod folder ==="
 Copy-Item $dll  (Join-Path $modDir "KenshiCoop.dll")
 Copy-Item $json (Join-Path $modDir "RE_Kenshi.json")
 Copy-Item $mod  (Join-Path $modDir "KenshiCoop.mod")
+# Protocol 65: the plugin reads its kit version from here for the version check
+# message ("the host has 0.65.0, you have 0.64.1").
+Set-Content (Join-Path $modDir "version.txt") $Version -Encoding ASCII -NoNewline
 
 # coop_config.json (LAN/UDP only; Steam play needs no config). Written fresh so
 # the release always ships a clean default.
