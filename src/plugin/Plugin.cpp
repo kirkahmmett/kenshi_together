@@ -1496,6 +1496,81 @@ void tickPing() {
     }
 }
 
+// ---- Speed requests --------------------------------------------------------------
+// The host alone sets speed and pause; a join's click is shown to the host as a
+// request it can apply (making it the host's own) or ignore. Expires after 30 s.
+struct SpeedAsk { coop::u32 owner; float req; DWORD tick; };
+std::vector<SpeedAsk> g_speedAsks;
+std::string           g_speedText[4];
+const DWORD           SPEED_ASK_MS = 30000;
+
+std::string speedWords(float req) {
+    if (req <= 0.01f) return "pause";
+    if (req <= 1.01f) return "normal speed";
+    char b[24];
+    _snprintf(b, sizeof(b) - 1, "%.0fx speed", req);
+    b[sizeof(b) - 1] = '\0';
+    return b;
+}
+
+void onSpeedAnswer(int index, bool apply) {
+    if (index < 0 || (size_t)index >= g_speedAsks.size()) return;
+    SpeedAsk a = g_speedAsks[index];
+    g_speedAsks.erase(g_speedAsks.begin() + index);
+    char b[128];
+    _snprintf(b, sizeof(b) - 1, "[speed] %s %s's request: %s", apply ? "applied" : "ignored",
+              playerName(a.owner).c_str(), speedWords(a.req).c_str());
+    b[sizeof(b) - 1] = '\0'; coopLog(b);
+    if (apply) g_repl.setHostSpeedRequest(a.req);
+}
+
+void tickSpeedVotes() {
+    DWORD now = GetTickCount();
+    if (g_cfg.isHost) {
+        coop::u32 owner; float req;
+        while (g_repl.takeSpeedVote(&owner, &req)) {
+            for (size_t i = 0; i < g_speedAsks.size(); ++i)
+                if (g_speedAsks[i].owner == owner) { g_speedAsks.erase(g_speedAsks.begin() + i); break; }
+            float eff = g_repl.effectiveSpeed();
+            if (eff >= 0.0f && fabs(eff - req) < 0.01f) continue; // already so
+            SpeedAsk a; a.owner = owner; a.req = req; a.tick = now;
+            g_speedAsks.push_back(a);
+            if (g_speedAsks.size() > 4) g_speedAsks.erase(g_speedAsks.begin());
+            char b[128];
+            _snprintf(b, sizeof(b) - 1, "[speed] %s asks for %s", playerName(owner).c_str(),
+                      speedWords(req).c_str());
+            b[sizeof(b) - 1] = '\0'; coopLog(b);
+            char kb[16];
+            _snprintf(kb, sizeof(kb) - 1, "F%d", g_cfg.panelKeyVk - 0x70 + 1);
+            kb[sizeof(kb) - 1] = '\0';
+            uiNotice(playerName(owner) + " asks for " + speedWords(req) + " - press " + kb + " to apply");
+        }
+        for (size_t i = 0; i < g_speedAsks.size();) {
+            if (now - g_speedAsks[i].tick >= SPEED_ASK_MS) g_speedAsks.erase(g_speedAsks.begin() + i);
+            else ++i;
+        }
+        // Test lever (KENSHICOOP_SPEED_TEST): apply any request after 2 s.
+        static int stH = -1;
+        if (stH < 0) { const char* e = getenv("KENSHICOOP_SPEED_TEST"); stH = (e && e[0]) ? 1 : 0; }
+        if (stH && !g_speedAsks.empty() && now - g_speedAsks[0].tick >= 2000) onSpeedAnswer(0, true);
+    } else {
+        float req;
+        if (g_repl.takeOwnSpeedAsk(&req) && g_peerPresent)
+            uiNotice("Speed is the host's call - asked them for " + speedWords(req));
+        // Test lever (KENSHICOOP_SPEED_TEST=N): N s into the game, click 3x speed.
+        static int stJ = -1;
+        static bool stFired = false;
+        if (stJ < 0) { const char* e = getenv("KENSHICOOP_SPEED_TEST"); stJ = (e && e[0]) ? atoi(e) : 0; }
+        if (stJ > 0 && !stFired && g_peerPresent && g_gameStarted && g_lastGw &&
+            now - g_gameStartTick >= (DWORD)stJ * 1000u) {
+            stFired = true;
+            coopLog("[speed] TEST: clicking 3x");
+            coop::engine::writeGameSpeed(g_lastGw, 3.0f, false);
+        }
+    }
+    if (!g_peerPresent) g_speedAsks.clear();
+}
+
 // ---- Trader sync (protocol 63) -------------------------------------------------
 // A join's purchase from a trader is reported to the host, which takes the same
 // units out of its copy of the trader (the stock it publishes to everyone).
@@ -2329,6 +2404,13 @@ void coopPanelDrive() {
     initPingKey();
     ps.onPing  = g_peerPresent ? &onPingRequest : 0;
     ps.pingKey = g_pingKeyName;
+    ps.speedCount = 0;
+    for (size_t si = 0; si < g_speedAsks.size() && si < 4; ++si) {
+        g_speedText[si] = playerName(g_speedAsks[si].owner) + " wants " + speedWords(g_speedAsks[si].req);
+        ps.speedText[si] = g_speedText[si].c_str();
+        ++ps.speedCount;
+    }
+    ps.onSpeedAnswer = (g_cfg.isHost && g_peerPresent) ? &onSpeedAnswer : 0;
     // Only the host pauses, and only on purpose (Space / panel button);
     // trade and dialogue windows no longer stop the game for everyone.
     coop::engine::setMultiplayerPauseRules(g_net.isRunning());
@@ -3234,6 +3316,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
     KC_PERF(S_NET_EVENTS, tickTrade(gw));
     KC_PERF(S_NET_EVENTS, tickShop());
     KC_PERF(S_NET_EVENTS, tickPing());
+    KC_PERF(S_NET_EVENTS, tickSpeedVotes());
     KC_PERF(S_NET_EVENTS, tickRoster(gw));
 
     // Coordinated load (protocol 32): the JOIN never loads locally while a

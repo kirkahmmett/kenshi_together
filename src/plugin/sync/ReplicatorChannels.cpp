@@ -2311,8 +2311,12 @@ void Replicator::syncSpeed(GameWorld* gw, Inbound& in, NetLink& net, u32 ownerId
     in.drainSpeed(got);
     for (std::deque<InboundSpeed>::iterator it = got.begin(); it != got.end(); ++it) {
         const SpeedPacket& p = it->pkt;
-        if (p.seq != 0 && speedSeqSeen_ != 0 && (long)(p.seq - speedSeqSeen_) <= 0)
+        // Per sender: with several joins one shared counter let one join's
+        // higher numbers swallow another's requests.
+        u32& seen = speedSeqBy_[it->ownerId];
+        if (p.seq != 0 && seen != 0 && (long)(p.seq - seen) <= 0)
             continue;
+        seen = p.seq;
         speedSeqSeen_ = p.seq;
         bool pkPaused = (p.flags & SPEED_PAUSED) != 0 || p.speed <= EPS;
         if (p.type == (u8)PKT_SPEED_REQ && isHost) {
@@ -2327,6 +2331,13 @@ void Replicator::syncSpeed(GameWorld* gw, Inbound& in, NetLink& net, u32 ownerId
             }
             speedPeerReq_    = req;
             speedPeerCombat_ = cmb;
+            // A changed request (not the first, which only seeds) is a vote
+            // for the host to answer.
+            std::map<u32, float>::iterator pr = speedReqBy_.find(it->ownerId);
+            if (pr != speedReqBy_.end() && fabs(req - pr->second) > EPS &&
+                speedVotes_.size() < 8)
+                speedVotes_.push_back(std::make_pair(it->ownerId, req));
+            speedReqBy_[it->ownerId] = req;
         } else if (p.type == (u8)PKT_SPEED_SET && !isHost) {
             // QUIET apply: drives the sim to the arbitrated effective without
             // touching the UI buttons - they keep showing this player's VOTE.
@@ -2394,6 +2405,9 @@ void Replicator::syncSpeed(GameWorld* gw, Inbound& in, NetLink& net, u32 ownerId
             }
         }
     } else {
+        if (userActed && speedLastSet_ >= 0.0f && fabs(speedMyReq_ - speedLastSet_) > EPS) {
+            ownSpeedAsk_ = true; ownSpeedAskReq_ = speedMyReq_;
+        }
         // Join: send our request on change / combat edge / safety resend.
         if (userActed || combatEdge || speedLastSendMs_ == 0 ||
             (now - speedLastSendMs_) >= RESEND_MS) {

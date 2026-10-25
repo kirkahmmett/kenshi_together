@@ -434,6 +434,17 @@ void (*g_editLookFn)() = 0;
 void (*g_resyncFn)() = 0;
 void (*g_tradeAnswerFn)(int, bool) = 0;
 void (*g_pingFn)() = 0;
+void (*g_speedAnswerFn)(int, bool) = 0;
+DataPanelLine* g_speedBtns[8] = { 0, 0, 0, 0, 0, 0, 0, 0 }; // [2i] apply, [2i+1] ignore
+void onSpeedBtn(DataPanelLine* line) {
+    for (int i = 0; i < 8; ++i) {
+        if (g_speedBtns[i] && (DataPanelLine*)g_speedBtns[i] == line) {
+            if (g_speedAnswerFn) g_speedAnswerFn(i / 2, (i % 2) == 0);
+            g_panel.needsRebuild = true;
+            return;
+        }
+    }
+}
 DataPanelLine* g_pingBtn = 0;
 void onPingBtn(DataPanelLine*) { if (g_pingFn) g_pingFn(); }
 DataPanelLine* g_tradeBtns[8] = { 0, 0, 0, 0, 0, 0, 0, 0 }; // [2i] accept, [2i+1] decline
@@ -674,6 +685,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
     g_resyncFn = st->onResync;
     g_tradeAnswerFn = st->onTradeAnswer;
     g_pingFn = st->onPing;
+    g_speedAnswerFn = st->onSpeedAnswer;
     g_reportFn = st->onReport;
     g_pauseToggleFn = st->onPauseToggle;
     ForgottenGUI* g = ::gui; // KenshiLib data export (spike 46)
@@ -902,6 +914,11 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
         sig += st->autoHost ? "A" : "a";
         sig += st->gamePaused ? "Z" : "z";
         sig += st->lookEditing ? "E" : "e";
+        if (st->onSpeedAnswer)
+            for (int si = 0; si < st->speedCount && si < 4; ++si) {
+                sig += "|s";
+                sig += st->speedText[si] ? st->speedText[si] : "";
+            }
         if (st->onTradeAnswer)
             for (int ti = 0; ti < st->tradeCount && ti < 4; ++ti) {
                 sig += "|t";
@@ -934,6 +951,7 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             g_editLookBtn = 0; g_resyncBtn = 0; g_reportBtn = 0;
             for (int i = 0; i < 8; ++i) g_tradeBtns[i] = 0;
             g_pingBtn = 0;
+            for (int i = 0; i < 8; ++i) g_speedBtns[i] = 0;
 #define ROW(k, kk, vv, o) do { if (n < SIMPLE_ROWS_MAX) { keys[n] = (kk); vals[n] = (vv); \
             rows[n].kind = (k); rows[n].key = &keys[n]; rows[n].val = &vals[n]; \
             rows[n].out = (DataPanelLine**)(o); ++n; } } while (0)
@@ -982,6 +1000,17 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
                                            ? std::string("Editing your character - close the editor when done")
                                            : std::string("Edit my character"),
                         &g_editLookBtn);
+                if (st->onSpeedAnswer && st->speedCount > 0) {
+                    ROW(0, "Speed", "Speed requests:", 0);
+                    for (int si = 0; si < st->speedCount && si < 4; ++si) {
+                        char ka[8], kd[8];
+                        _snprintf(ka, sizeof(ka) - 1, "spa%d", si); ka[sizeof(ka) - 1] = 0;
+                        _snprintf(kd, sizeof(kd) - 1, "spd%d", si); kd[sizeof(kd) - 1] = 0;
+                        ROW(1, ka, std::string("    Apply: ") + (st->speedText[si] ? st->speedText[si] : "?"),
+                            &g_speedBtns[si * 2]);
+                        ROW(1, kd, "        Ignore", &g_speedBtns[si * 2 + 1]);
+                    }
+                }
                 if (st->onTradeAnswer && st->tradeCount > 0) {
                     ROW(0, "Requests", "Trade requests for your characters:", 0);
                     for (int ti = 0; ti < st->tradeCount && ti < 4; ++ti) {
@@ -1059,6 +1088,8 @@ void coopPanelTick(const CoopPanelState* st, CoopConnectFn onConnect,
             for (int i = 0; i < 8; ++i)
                 if (g_tradeBtns[i]) g_tradeBtns[i]->callback = MyGUI::newDelegate(&onTradeBtn);
             if (g_pingBtn) g_pingBtn->callback = MyGUI::newDelegate(&onPingBtn);
+            for (int i = 0; i < 8; ++i)
+                if (g_speedBtns[i]) g_speedBtns[i]->callback = MyGUI::newDelegate(&onSpeedBtn);
             if (g_reportBtn) g_reportBtn->callback = MyGUI::newDelegate(&onReportBtn);
             for (int i = 0; i < GAME_ROWS_MAX; ++i)
                 if (g_gameBtns[i]) g_gameBtns[i]->callback = MyGUI::newDelegate(&onGameBtn);

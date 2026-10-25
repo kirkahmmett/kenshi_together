@@ -2468,6 +2468,25 @@ public:
     // Ready barrier (protocol 59): while set, the host's effective speed is
     // pause for everyone (a join is still loading).
     void setSpeedHold(bool on) { speedHold_ = on; }
+    // Speed requests (2026-10-25). The host alone sets speed and pause; a join's
+    // speed or pause click becomes a REQUEST the host can apply from the panel.
+    // Host: takeSpeedVote returns each join's request when it changes (not the
+    // first, seeding one); setHostSpeedRequest makes a request the host's own.
+    // Join: takeOwnSpeedAsk returns our click when it differs from the speed the
+    // host set, so the player can be told it went to the host.
+    bool takeSpeedVote(u32* owner, float* req) {
+        if (speedVotes_.empty()) return false;
+        *owner = speedVotes_.front().first; *req = speedVotes_.front().second;
+        speedVotes_.pop_front();
+        return true;
+    }
+    void setHostSpeedRequest(float req) { speedMyReq_ = req; }
+    float effectiveSpeed() const { return speedLastSet_; }
+    bool takeOwnSpeedAsk(float* req) {
+        if (!ownSpeedAsk_) return false;
+        ownSpeedAsk_ = false; *req = ownSpeedAskReq_;
+        return true;
+    }
     // Who authors the region containing (x,z)? The claimant, or the HOST when
     // the feature is off, the cell is unclaimed, or the mapping is unavailable.
     // Never returns "nobody" - an unowned region is the case this exists to
@@ -2561,6 +2580,11 @@ private:
     float         speedLastSet_;       // host: last broadcast effective; join: last received
     u32           speedSeqOut_;        // per-sender monotonic seq for REQ/SET we send
     u32           speedSeqSeen_;       // newest seq accepted from the peer (stale guard)
+    std::map<u32, u32>   speedSeqBy_;  // the same guard per sender (several joins)
+    std::map<u32, float> speedReqBy_;  // host: each join's latest request
+    std::deque<std::pair<u32, float> > speedVotes_; // host: changed requests for the panel
+    bool          ownSpeedAsk_;        // join: our click differs from the host's speed
+    float         ownSpeedAskReq_;
     unsigned long speedLastSendMs_;    // last REQ (join) / SET (host) send, safety resend
     unsigned long speedCombatSampleMs_;// last own-combat sample time
     unsigned long speedCombatHoldMs_;  // last time own-squad combat read TRUE (cap hysteresis)

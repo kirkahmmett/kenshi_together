@@ -110,6 +110,10 @@ struct CoopPanelState {
     // Shared pings (v64): "Ping where I look" (null = hidden); pingKey names the hotkey.
     void               (*onPing)();
     const char*        pingKey;
+    // Speed requests from joins (host): display lines; onSpeedAnswer(i, apply).
+    int                speedCount;
+    const char*        speedText[4];
+    void               (*onSpeedAnswer)(int index, bool apply);
 };
 // The panel's role/transport selections at the moment Connect is hit. peerId is the
 // Steam ID pasted in-panel this session (0 if none), and overrides the config

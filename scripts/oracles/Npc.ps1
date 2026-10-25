@@ -1985,17 +1985,20 @@ function Test-SpeedSync {
     $combatSet = @($sets | Where-Object { $_.combat -eq 1 -and $_.mult -le 1.01 -and $_.mult -ge 0.99 }) | Select-Object -First 1
     if ($null -eq $combatSet) { $bad += "no combat demotion (no SET with combat=1 mult=1)" }
 
-    # Denied raise: min semantics say the host's lone 3x click (T+10) must not
-    # change the effective speed; the first 3x SET must come at/after the
-    # JOIN's first 3x click.
+    # Host authority (2026-10-23, the players' choice): the HOST alone sets speed
+    # and pause - its 3x click must become the effective speed promptly. (Until
+    # then this asserted "min arbitration": a lone host raise had to be denied
+    # until the join also clicked 3x.) A join's click is only a request the
+    # host may apply from its panel.
     $tHostClick = Get-MarkerTimeMs -File $HostFile -Pattern 'SCENARIO SPEEDSYNC host click mult=3'
-    $tJoinClick = Get-MarkerTimeMs -File $JoinFile -Pattern 'SCENARIO SPEEDSYNC join click mult=3'
-    $first3 = @($sets | Where-Object { [Math]::Abs([double]$_.mult - 3.0) -le 0.01 }) | Select-Object -First 1
-    if ($null -ne $tHostClick -and $null -ne $first3) {
-        if ($null -eq $tJoinClick -or [double]$first3.t -lt ([double]$tJoinClick - 1000)) {
-            $bad += "host's lone 3x click propagated (3x SET at t=$([long]$first3.t) before the join's 3x click - min arbitration broken)"
+    $first3 = @($sets | Where-Object { [Math]::Abs([double]$_.mult - 3.0) -le 0.01 -and
+                                       ($null -eq $tHostClick -or [double]$_.t -ge ([double]$tHostClick - 500)) }) |
+              Select-Object -First 1
+    if ($null -ne $tHostClick) {
+        if ($null -eq $first3 -or [double]$first3.t -gt ([double]$tHostClick + 3000)) {
+            $bad += "host's 3x click did not become the effective speed within 3s (host authority broken)"
         } else {
-            $m.deniedRaise = $true
+            $m.hostRaise = $true
         }
     }
 
@@ -2017,11 +2020,14 @@ function Test-SpeedSync {
         $tReraise = Get-MarkerTimeMs -File $HostFile -Pattern 'SCENARIO SPEEDSYNC host click mult=3\.0 ok=1 tag=reraise'
         $tRaise2  = Get-MarkerTimeMs -File $JoinFile -Pattern 'SCENARIO SPEEDSYNC join click mult=3\.0 ok=1 tag=raise2'
         if ($null -ne $tReraise) {
-            $limit = if ($null -ne $tRaise2) { [double]$tRaise2 - 1000 } else { [double]::MaxValue }
-            $leak = @($sets | Where-Object { [Math]::Abs([double]$_.mult - 3.0) -le 0.01 -and
-                                             [double]$_.t -ge [double]$tReraise -and [double]$_.t -lt $limit }) | Select-Object -First 1
-            if ($null -ne $leak) { $bad += "host re-raise propagated to 3x at t=$([long]$leak.t) despite the join's lowered vote (min arbitration ignored the same-value vote)" }
-            else { $m.reraiseDenied = $true }
+            # Host authority: the host's re-raise applies whatever the join asked.
+            $up = @($sets | Where-Object { [Math]::Abs([double]$_.mult - 3.0) -le 0.01 -and
+                                           [double]$_.t -ge ([double]$tReraise - 500) -and
+                                           [double]$_.t -le ([double]$tReraise + 3000) }) | Select-Object -First 1
+            $already3 = @($sets | Where-Object { [double]$_.t -lt [double]$tReraise }) | Select-Object -Last 1
+            if ($null -eq $up -and -not ($null -ne $already3 -and [Math]::Abs([double]$already3.mult - 3.0) -le 0.01)) {
+                $bad += "host re-raise to 3x did not apply within 3s (host authority broken)"
+            } else { $m.hostReraise = $true }
         }
     }
 

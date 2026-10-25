@@ -89,6 +89,7 @@ Replicator::Replicator()
       researchSeqOut_(1), researchSampleMs_(0), researchSync_(true),
       deedSeqOut_(1), deedSampleMs_(0), deedAuditMs_(0), deedSync_(true),
       fixtureSeqOut_(1), fixtureSampleMs_(0), fixtureSync_(true),
+      ownSpeedAsk_(false), ownSpeedAskReq_(0.0f),
       storeSync_(false), contCensusMs_(0),
       traderSync_(false), traderCensusMs_(0),
       timeSync_(true), timeBrake_(true),
