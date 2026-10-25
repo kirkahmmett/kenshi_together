@@ -146,3 +146,14 @@ build** after a bump.
 - HELLO carries the join's kit version after the mod fingerprint (u8 length +
   chars). The kit writes `KenshiCoop\version.txt`; a dev deploy reports "dev".
 - Test lever `KENSHICOOP_FAKE_PROTOCOL=N`: the join announces protocol N.
+
+## 66 - live character looks
+
+- `PKT_CHAR_LOOK` APPLY is re-broadcast host -> joins (`target` = the editing
+  player); every client applies the look to its own copy live. The host no
+  longer saves and reloads everyone after a character edit - in the field each
+  edit cost every join a 3.5 MB save download and a load screen.
+- The editor opens unlocked: `isMidGame` off, no race limits, race / subrace /
+  gender arrows enabled (the mid-game editor locked them, so a new player kept
+  the host's race).
+- Test lever `KENSHICOOP_LOOK_TEST` also presses "next race".

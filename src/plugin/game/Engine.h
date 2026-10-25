@@ -821,6 +821,13 @@ bool firstItemOf(const unsigned int hand[5], char* sid, unsigned int sidLen,
 bool openCharacterEditor(GameWorld* gw, const unsigned int hand[5]);
 int  characterEditorOpen(GameWorld* gw);
 bool closeCharacterEditor(GameWorld* gw); // test lever: PlayerInterface::setCharacterEditMode(false)
+// The in-game editor opens in MID-GAME mode, which locks race and gender (the
+// barber view). unlockCharacterEditor turns the open window into the new-game
+// kind: isMidGame off, no race limits, the race/gender/subrace arrows enabled.
+// Returns true once done (false while the window does not exist yet).
+bool unlockCharacterEditor();
+// Test lever: press the editor's "next race" arrow; returns the race sid after.
+bool editorClickNextRace(char* raceSid, unsigned int len);
 bool exportCharacterLook(const unsigned int hand[5], const std::string& path,
                          std::string& name, std::string& raceSid);
 bool importCharacterLook(GameWorld* gw, const unsigned int hand[5], const std::string& path,

@@ -25,7 +25,7 @@ typedef double         f64;
 // this header stays a definition file. When you bump PROTOCOL_VERSION, add the
 // matching entry at the bottom of that doc. The version is checked at handshake
 // and a mismatch is rejected (no back-compat).
-const u16 PROTOCOL_VERSION = 65;
+const u16 PROTOCOL_VERSION = 66;
 
 // Packet type tags (first byte of every packet).
 enum PacketType {
@@ -1646,8 +1646,9 @@ struct LoadReadyPacket {
 //         own squad; no payload.
 //   APPLY (join -> host): the edited character (hand), its name, race sid and
 //         the appearance GameData as written by GameData::saveToFile. The host
-//         writes it into its copy, saves, and reloads everyone so all clients
-//         share the result. Not relayed.
+//         writes it into its copy and (v66) re-broadcasts it host -> joins with
+//         `target` = the editing player; every other client applies it to its
+//         own copy live. No save, no world reload.
 // Protocol 61: a join asks the host to resync everyone (the panel's "Resync"
 // button). The host saves the live world and every client reloads it - the
 // same coordinated reload a new player's squad uses. Join -> host only.

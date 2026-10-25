@@ -1216,7 +1216,8 @@ void NetLink::threadLoop() {
                             if (len >= need && hdr.nameLen <= CHAR_LOOK_NAME_MAX &&
                                 hdr.raceLen <= CHAR_LOOK_RACE_MAX &&
                                 hdr.dataLen <= CHAR_LOOK_DATA_MAX &&
-                                (isHost_ ? hdr.kind == CHAR_LOOK_APPLY : hdr.kind == CHAR_LOOK_OFFER))
+                                (isHost_ ? hdr.kind == CHAR_LOOK_APPLY
+                                         : (hdr.kind == CHAR_LOOK_OFFER || hdr.kind == CHAR_LOOK_APPLY)))
                                 inbound_->pushCharLook(isHost_ ? (u32)(size_t)ev.peer->data : 0,
                                                        hdr, ev.packet->data + sizeof(CharLookHeader));
                         }

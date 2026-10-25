@@ -355,6 +355,7 @@ bool          g_lookWanted   = false;   // open the editor when the world is set
 DWORD         g_lookWantTick = 0;
 bool          g_lookEditing  = false;   // our editor is open (or opening)
 bool          g_lookSeenOpen = false;
+bool          g_lookUnlocked = false;   // race/gender arrows enabled in the open editor
 DWORD         g_lookOpenTick = 0;
 unsigned int  g_lookHand[5]  = { 0, 0, 0, 0, 0 };
 DWORD         g_lastWorldResetTick = 0;
@@ -1091,11 +1092,63 @@ void applyLook(GameWorld* gw, const coop::InboundCharLook& cl) {
               (unsigned)cl.senderId, cl.name.c_str(), cl.race.c_str(), ok ? "applied" : "FAILED");
     b[sizeof(b) - 1] = '\0';
     coopLog(b);
-    if (ok && g_cfg.saveSync) {
-        // Everyone reloads the saved world, so every client draws the new look.
-        g_bootReloadHost = true;
-        armConnectPush();
+    if (ok) {
+        // v66: no save and no world reload - the look goes to every join, which
+        // applies it to its own copy. The host's next save carries it.
+        coop::CharLookHeader h = cl.hdr;
+        h.ownerId = g_net.localId();
+        h.target  = cl.senderId;
+        g_net.queueCharLook(h, cl.name, cl.race, cl.data);
     }
+}
+
+std::string playerName(coop::u32 id); // below
+
+// Join: another player's edited character, re-sent by the host - apply it here.
+void applyLookFromHost(GameWorld* gw, const coop::InboundCharLook& cl) {
+    if (cl.hdr.target == g_net.localId()) return; // our own edit: already on screen
+    FILE* f = fopen(LOOK_IN_FILE, "wb");
+    if (!f) return;
+    if (!cl.data.empty()) fwrite(&cl.data[0], 1, cl.data.size(), f);
+    fclose(f);
+    unsigned int hand[5];
+    for (int i = 0; i < 5; ++i) hand[i] = cl.hdr.hand[i];
+    bool ok = coop::engine::importCharacterLook(gw, hand, LOOK_IN_FILE, cl.name, cl.race);
+    char b[192];
+    _snprintf(b, sizeof(b) - 1, "[look] %s's new look: name='%s' race='%s' %s",
+              playerName(cl.hdr.target).c_str(), cl.name.c_str(), cl.race.c_str(), ok ? "applied" : "FAILED");
+    b[sizeof(b) - 1] = '\0';
+    coopLog(b);
+}
+
+// Host: our own edit goes to every join the same way.
+void broadcastOwnLook() {
+    std::string name, race;
+    if (!coop::engine::exportCharacterLook(g_lookHand, LOOK_OUT_FILE, name, race)) return;
+    std::vector<coop::u8> data;
+    FILE* f = fopen(LOOK_OUT_FILE, "rb");
+    if (f) {
+        unsigned char buf[4096];
+        size_t got;
+        while ((got = fread(buf, 1, sizeof(buf), f)) > 0 && data.size() <= coop::CHAR_LOOK_DATA_MAX)
+            data.insert(data.end(), buf, buf + got);
+        fclose(f);
+    }
+    if (data.empty() || data.size() > coop::CHAR_LOOK_DATA_MAX) return;
+    if (name.size() > coop::CHAR_LOOK_NAME_MAX) name.resize(coop::CHAR_LOOK_NAME_MAX);
+    if (race.size() > coop::CHAR_LOOK_RACE_MAX) race.clear();
+    coop::CharLookHeader h;
+    memset(&h, 0, sizeof(h));
+    h.type = (coop::u8)coop::PKT_CHAR_LOOK;
+    h.kind = coop::CHAR_LOOK_APPLY;
+    h.ownerId = g_net.localId();
+    h.target = g_net.localId();
+    for (int i = 0; i < 5; ++i) h.hand[i] = g_lookHand[i];
+    h.nameLen = (coop::u16)name.size();
+    h.raceLen = (coop::u16)race.size();
+    h.dataLen = (coop::u32)data.size();
+    g_net.queueCharLook(h, name, race, data);
+    coopLog("[look] sent my edited character to the joins");
 }
 
 void tickLook(GameWorld* gw) {
@@ -1109,6 +1162,8 @@ void tickLook(GameWorld* gw) {
             coopLog("[look] the host offered the character editor");
         } else if (it->hdr.kind == coop::CHAR_LOOK_APPLY && g_cfg.isHost && gw) {
             applyLook(gw, *it);
+        } else if (it->hdr.kind == coop::CHAR_LOOK_APPLY && !g_cfg.isHost && gw) {
+            applyLookFromHost(gw, *it);
         }
     }
     if (!gw || !g_gameStarted || !coop::engine::gameplayLive(gw)) return;
@@ -1129,6 +1184,16 @@ void tickLook(GameWorld* gw) {
         g_lookWantTick = now - 3000;
         coopLog("[look] TEST: opening the editor");
     }
+    // ... and 2 s in it presses "next race", so the unlocked arrows are exercised.
+    static bool lookTestRaced = false;
+    if (lookTestS > 0 && g_lookEditing && g_lookSeenOpen && !lookTestRaced && now - g_lookOpenTick > 2000) {
+        lookTestRaced = true;
+        char rs[64];
+        bool ok = coop::engine::editorClickNextRace(rs, sizeof(rs));
+        char b[128];
+        _snprintf(b, sizeof(b) - 1, "[look] TEST: next race -> %s (%s)", rs, ok ? "ok" : "FAILED");
+        b[sizeof(b) - 1] = '\0'; coopLog(b);
+    }
     if (lookTestS > 0 && g_lookEditing && g_lookSeenOpen && now - g_lookOpenTick > 4000) {
         coopLog("[look] TEST: closing the editor");
         coop::engine::closeCharacterEditor(gw);
@@ -1143,6 +1208,7 @@ void tickLook(GameWorld* gw) {
             coopLog("[look] no character of mine found - editor not opened");
         } else if (coop::engine::openCharacterEditor(gw, g_lookHand)) {
             g_lookEditing = true; g_lookSeenOpen = false; g_lookOpenTick = now;
+            g_lookUnlocked = false;
             coopLog("[look] character editor opened");
         } else {
             coopErr("[look] character editor FAILED to open");
@@ -1151,15 +1217,17 @@ void tickLook(GameWorld* gw) {
     if (g_lookEditing) {
         int st = coop::engine::characterEditorOpen(gw);
         if (st == 1) g_lookSeenOpen = true;
+        if (st == 1 && !g_lookUnlocked && coop::engine::unlockCharacterEditor()) {
+            g_lookUnlocked = true;
+            coopLog("[look] editor unlocked: race and gender can be changed");
+        }
         if (st == 0 && g_lookSeenOpen) {
             g_lookEditing = false;
             coopLog("[look] character editor closed");
             if (!g_cfg.isHost) {
                 if (g_peerPresent) sendLookApply(gw);
-            } else if (g_peerPresent && g_cfg.saveSync) {
-                // The host's own edit: reload everyone so they see it too.
-                g_bootReloadHost = true;
-                armConnectPush();
+            } else if (g_peerPresent) {
+                broadcastOwnLook(); // the host's own edit: every join applies it live
             }
         } else if (!g_lookSeenOpen && now - g_lookOpenTick > 5000) {
             g_lookEditing = false;

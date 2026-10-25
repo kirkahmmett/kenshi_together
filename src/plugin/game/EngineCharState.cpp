@@ -13,6 +13,7 @@
 #include "EngineInternal.h"
 #include <kenshi/RaceData.h> // Character::myRace->data (character editor, v60)
 #include <kenshi/gui/ForgottenGUI.h> // ForgottenGUI::closeCharacterEditor
+#include <kenshi/gui/CharacterEditWindow.h> // isMidGame / raceLimits / arrow buttons
 
 namespace coop {
 namespace engine {
@@ -202,6 +203,45 @@ bool closeCharacterEditor(GameWorld* gw) {
         if (g_setEditModeFn && gw->player) { g_setEditModeFn(gw->player, false); ok = true; }
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
     return ok;
+}
+
+static bool unlockEditorSeh(CharacterEditWindow* w) {
+    __try {
+        w->isMidGame = false;
+        w->raceLimits = 0;
+        MyGUI::Button* btns[6] = { w->btnPrevGender, w->btnNextGender, w->btnPrevRace,
+                                   w->btnNextRace, w->btnPrevSubRace, w->btnNextSubRace };
+        for (int i = 0; i < 6; ++i) {
+            if (!btns[i]) continue;
+            btns[i]->setVisible(true);
+            btns[i]->setEnabled(true);
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+bool unlockCharacterEditor() {
+    ForgottenGUI* g = ::gui;
+    if (!g) return false;
+    CharacterEditWindow* w = 0;
+    __try { w = g->characterEditor; } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    return w ? unlockEditorSeh(w) : false;
+}
+static bool clickNextRaceSeh(CharacterEditWindow* w, const char** sid) {
+    __try {
+        if (!w->btnNextRace) return false;
+        w->btnNextRace->eventMouseButtonClick(w->btnNextRace);
+        *sid = w->raceData ? w->raceData->stringID.c_str() : "";
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+bool editorClickNextRace(char* raceSid, unsigned int len) {
+    if (raceSid && len) raceSid[0] = 0;
+    ForgottenGUI* g = ::gui;
+    if (!g || !g->characterEditor) return false;
+    const char* sid = 0;
+    if (!clickNextRaceSeh(g->characterEditor, &sid)) return false;
+    if (raceSid && len && sid) { strncpy(raceSid, sid, len - 1); raceSid[len - 1] = 0; }
+    return true;
 }
 
 // Raw reads/writes: no C++ objects in these frames.
