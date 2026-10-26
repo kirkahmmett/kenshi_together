@@ -29,6 +29,9 @@
 [CmdletBinding()]
 param(
     [switch]$SkipBuild,
+    # Also wrap the kit in a double-click setup exe (IExpress). Off by default:
+    # players install from the zip with KenshiCoop-Setup.cmd (2026-10-26).
+    [switch]$Exe,
     # Release version shown in README/PROVENANCE and in the zip name
     # (major.PROTOCOL.patch: a new protocol bumps the middle number).
     [string]$Version = "0.58.0",
@@ -250,9 +253,11 @@ $zip = Join-Path $repoRoot "dist\KenshiCoop-kit.zip"
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path (Join-Path $kitDir "*") -DestinationPath $zip
 
-# One double-click setup exe around the same kit (IExpress, built into Windows).
-& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "make_setup_exe.ps1") -Version $Version
-if ($LASTEXITCODE -ne 0) { throw "make_setup_exe.ps1 failed ($LASTEXITCODE)" }
+# Optional double-click setup exe around the same kit (IExpress, built into Windows).
+if ($Exe) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "make_setup_exe.ps1") -Version $Version
+    if ($LASTEXITCODE -ne 0) { throw "make_setup_exe.ps1 failed ($LASTEXITCODE)" }
+}
 
 Write-Host ""
 Write-Host "Mod folder: $modDir"
