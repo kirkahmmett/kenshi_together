@@ -205,42 +205,67 @@ bool closeCharacterEditor(GameWorld* gw) {
     return ok;
 }
 
+// The editor's race handlers are private members. An explicit template
+// instantiation may name a private member (access is not checked there), which
+// hands KenshiLib the member pointer it maps to the live address.
+template <typename Tag, typename Tag::type M>
+struct EdRob { friend typename Tag::type edGet(Tag) { return M; } };
+struct EdLoadDataTag { typedef void (CharacterEditWindow::*type)(); friend type edGet(EdLoadDataTag); };
+struct EdNextRaceTag { typedef void (CharacterEditWindow::*type)(MyGUI::Widget*); friend type edGet(EdNextRaceTag); };
+template struct EdRob<EdLoadDataTag, &CharacterEditWindow::loadData>;
+template struct EdRob<EdNextRaceTag, &CharacterEditWindow::nextRace>;
+typedef void (__fastcall* EdVoidFn)(CharacterEditWindow* self);
+typedef void (__fastcall* EdWidgetFn)(CharacterEditWindow* self, MyGUI::Widget* w);
+static EdVoidFn   g_edLoadDataFn = 0;
+static EdWidgetFn g_edNextRaceFn = 0;
+static void resolveEdFns() {
+    if (!g_edLoadDataFn) g_edLoadDataFn = (EdVoidFn)KenshiLib::GetRealAddress(edGet(EdLoadDataTag()));
+    if (!g_edNextRaceFn) g_edNextRaceFn = (EdWidgetFn)KenshiLib::GetRealAddress(edGet(EdNextRaceTag()));
+}
+
 static bool unlockEditorSeh(CharacterEditWindow* w) {
-    __try {
-        w->isMidGame = false;
-        w->raceLimits = 0;
-        MyGUI::Button* btns[6] = { w->btnPrevGender, w->btnNextGender, w->btnPrevRace,
-                                   w->btnNextRace, w->btnPrevSubRace, w->btnNextSubRace };
-        for (int i = 0; i < 6; ++i) {
-            if (!btns[i]) continue;
-            btns[i]->setVisible(true);
-            btns[i]->setEnabled(true);
-        }
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    // Measured 2026-10-26: in a mid-game window the race/gender arrows are not
+    // wired (a click changes nothing) and CharacterEditWindow::nextRace faults when
+    // called directly (it reads state only the new-game editor sets up). Enabling
+    // them only produced dead buttons, so the window is left exactly as Kenshi
+    // opens it: appearance only. Race and gender need another route.
+    (void)w;
+    return true;
 }
 bool unlockCharacterEditor() {
+    resolveEdFns();
     ForgottenGUI* g = ::gui;
     if (!g) return false;
     CharacterEditWindow* w = 0;
     __try { w = g->characterEditor; } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
     return w ? unlockEditorSeh(w) : false;
 }
-static bool clickNextRaceSeh(CharacterEditWindow* w, const char** sid) {
+static bool clickNextRaceSeh(CharacterEditWindow* w, const char** before, const char** afterClick,
+                             const char** afterCall) {
+    // Two isolated steps, so a fault names the step: the user's path (the
+    // button's click event) first, then the handler called directly.
     __try {
+        *before = w->raceData ? w->raceData->stringID.c_str() : "";
         if (!w->btnNextRace) return false;
         w->btnNextRace->eventMouseButtonClick(w->btnNextRace);
-        *sid = w->raceData ? w->raceData->stringID.c_str() : "";
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        *afterClick = w->raceData ? w->raceData->stringID.c_str() : "";
+    } __except (EXCEPTION_EXECUTE_HANDLER) { *afterClick = "CLICK-FAULT"; return true; }
+    // The handler itself is NOT called: it faults in a mid-game window.
+    *afterCall = "not-called";
+    return true;
 }
 bool editorClickNextRace(char* raceSid, unsigned int len) {
     if (raceSid && len) raceSid[0] = 0;
     ForgottenGUI* g = ::gui;
     if (!g || !g->characterEditor) return false;
-    const char* sid = 0;
-    if (!clickNextRaceSeh(g->characterEditor, &sid)) return false;
-    if (raceSid && len && sid) { strncpy(raceSid, sid, len - 1); raceSid[len - 1] = 0; }
+    resolveEdFns();
+    const char* b0 = ""; const char* b1 = ""; const char* b2 = "";
+    if (!clickNextRaceSeh(g->characterEditor, &b0, &b1, &b2)) return false;
+    if (raceSid && len) {
+        _snprintf(raceSid, len - 1, "before=%s click=%s call=%s fns=%d%d", b0, b1, b2,
+                  g_edLoadDataFn ? 1 : 0, g_edNextRaceFn ? 1 : 0);
+        raceSid[len - 1] = 0;
+    }
     return true;
 }
 

@@ -1193,9 +1193,9 @@ void tickLook(GameWorld* gw) {
     static bool lookTestRaced = false;
     if (lookTestS > 0 && g_lookEditing && g_lookSeenOpen && !lookTestRaced && now - g_lookOpenTick > 2000) {
         lookTestRaced = true;
-        char rs[64];
+        char rs[192];
         bool ok = coop::engine::editorClickNextRace(rs, sizeof(rs));
-        char b[128];
+        char b[256];
         _snprintf(b, sizeof(b) - 1, "[look] TEST: next race -> %s (%s)", rs, ok ? "ok" : "FAILED");
         b[sizeof(b) - 1] = '\0'; coopLog(b);
     }
@@ -1224,7 +1224,7 @@ void tickLook(GameWorld* gw) {
         if (st == 1) g_lookSeenOpen = true;
         if (st == 1 && !g_lookUnlocked && coop::engine::unlockCharacterEditor()) {
             g_lookUnlocked = true;
-            coopLog("[look] editor unlocked: race and gender can be changed");
+            coopLog("[look] editor ready (appearance only)");
         }
         if (st == 0 && g_lookSeenOpen) {
             g_lookEditing = false;

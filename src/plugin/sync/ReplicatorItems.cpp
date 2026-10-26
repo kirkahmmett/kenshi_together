@@ -1686,6 +1686,25 @@ void Replicator::detectAndPublishTransfers(GameWorld* gw, NetLink& net, u32 owne
         const Fire& f = fires[i];
         bool srcOwn = ownedContainers_.count(f.src) != 0 || ownHands_.count(f.src) != 0;
         bool dstOwn = ownedContainers_.count(f.dst) != 0 || ownHands_.count(f.dst) != 0;
+        // The take rule's last line (2026-10-26 field test): a worn item dragged
+        // straight out of another player's equipment slot reaches neither add
+        // detour, but this detector sees every completed move. Out of another
+        // PLAYER's character into ours while taking is off: put it back here and
+        // send nothing - their snapshots never saw it leave.
+        if (!srcOwn && dstOwn && allSquad_.count(f.src) && !engine::takeFromPlayersAllowed()) {
+            unsigned int sH[5] = { f.src.t, f.src.c, f.src.cs, f.src.i, f.src.s };
+            unsigned int dH[5] = { f.dst.t, f.dst.c, f.dst.cs, f.dst.i, f.dst.s };
+            int back = engine::moveItemBetweenContainers(gw, dH, sH, f.key.first.c_str(),
+                                                         f.key.second, f.qty, /*suspendVeto*/ true);
+            engine::noteTakeRefusedXfer(gw, sH, dH, f.key.first.c_str(), f.key.second, f.qty);
+            char b[200]; _snprintf(b, sizeof(b) - 1,
+                "[xfer] REFUSED take sid='%s' qty=%d from %u,%u - put back %d",
+                f.key.first.c_str(), f.qty, f.src.i, f.src.s, back);
+            b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            xferRebase(gw, f.src);
+            xferRebase(gw, f.dst);
+            continue;
+        }
         if (!srcOwn || !dstOwn) {
             // At least one end is peer-authored: the single-writer snapshots cannot
             // carry this move - author the reliable transfer intent.

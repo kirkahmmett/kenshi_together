@@ -781,6 +781,11 @@ int createPlayerSquad(GameWorld* gw, const char* name);
 // Off by default in a session: taking only from your own characters; giving is
 // always allowed. Set on every client from the host's setting.
 void setTakeFromPlayers(bool allowed);
+bool takeFromPlayersAllowed();
+// A take the transfer detector caught (any UI path - a worn item dragged out of
+// an equipment slot never reaches the add detours): notice + a consent request.
+void noteTakeRefusedXfer(GameWorld* gw, const unsigned int src[5], const unsigned int dst[5],
+                         const char* sid, unsigned int typeCat, int qty);
 // Control lock: while on, enforceOwnSelection (call once per tick) deselects any
 // selected squad member that belongs to another player. Returns how many.
 void setControlLock(bool on);

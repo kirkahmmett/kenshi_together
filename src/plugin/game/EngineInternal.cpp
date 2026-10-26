@@ -759,6 +759,22 @@ static void noteTakeRequest(const unsigned int src[5], const unsigned int dst[5]
     s_last = e; s_lastTick = now;
     if (g_takeReqs.size() < 16) g_takeReqs.push_back(e);
 }
+bool takeFromPlayersAllowed() { return g_permTake; }
+void noteTakeRefusedXfer(GameWorld* gw, const unsigned int src[5], const unsigned int dst[5],
+                         const char* sid, unsigned int typeCat, int qty) {
+    (void)gw;
+    notePermRefusal(4, "taking items from another player's character (transfer)");
+    if (!sid || !sid[0] || g_takeReqs.size() >= 16) return;
+    TakeRequestEdge e;
+    memset(&e, 0, sizeof(e));
+    memcpy(e.src, src, sizeof(e.src));
+    memcpy(e.dst, dst, sizeof(e.dst));
+    e.typeCat = typeCat;
+    e.qty = qty > 0 ? qty : 1;
+    strncpy(e.sid, sid, sizeof(e.sid) - 1);
+    strncpy(e.name, sid, sizeof(e.name) - 1); // the template id; the owner's panel shows it
+    g_takeReqs.push_back(e);
+}
 unsigned int drainTakeRequests(TakeRequestEdge* out, unsigned int maxOut) {
     unsigned int n = 0;
     for (; n < g_takeReqs.size() && n < maxOut; ++n) out[n] = g_takeReqs[n];
