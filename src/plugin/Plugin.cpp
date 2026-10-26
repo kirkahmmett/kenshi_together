@@ -1067,6 +1067,26 @@ void sendLookApply(GameWorld* gw) {
     coopLog(b);
 }
 
+// Where an edited character stands, around the editor and the look's apply -
+// the "teleported while creating a character" field report (2026-10-26).
+void logLookPos(GameWorld* gw, const unsigned int h[5], const char* tag) {
+    coop::EntityState sq[64];
+    unsigned int n = coop::engine::captureSquad(gw, /*leaderOnly*/ false, sq, 64);
+    for (unsigned int i = 0; i < n; ++i) {
+        if (sq[i].hType != h[0] || sq[i].hContainer != h[1] || sq[i].hContainerSerial != h[2] ||
+            sq[i].hIndex != h[3] || sq[i].hSerial != h[4]) continue;
+        char b[160];
+        _snprintf(b, sizeof(b) - 1, "[look] pos %s: %.1f,%.1f,%.1f", tag, sq[i].x, sq[i].y, sq[i].z);
+        b[sizeof(b) - 1] = '\0'; coopLog(b);
+        return;
+    }
+    char b[96];
+    _snprintf(b, sizeof(b) - 1, "[look] pos %s: character not in the squad", tag);
+    b[sizeof(b) - 1] = '\0'; coopLog(b);
+}
+unsigned int g_lookPosLaterHand[5];
+DWORD        g_lookPosLaterTick = 0;
+
 // Host: a player's edited character. Only their own squad may be changed.
 void applyLook(GameWorld* gw, const coop::InboundCharLook& cl) {
     std::map<coop::u32, std::string>::const_iterator nm = g_names.find(cl.senderId);
@@ -1091,7 +1111,11 @@ void applyLook(GameWorld* gw, const coop::InboundCharLook& cl) {
     fclose(f);
     unsigned int hand[5];
     for (int i = 0; i < 5; ++i) hand[i] = cl.hdr.hand[i];
+    logLookPos(gw, hand, "before apply");
     bool ok = coop::engine::importCharacterLook(gw, hand, LOOK_IN_FILE, cl.name, cl.race);
+    logLookPos(gw, hand, "after apply");
+    memcpy(g_lookPosLaterHand, hand, sizeof(hand));
+    g_lookPosLaterTick = GetTickCount();
     char b[192];
     _snprintf(b, sizeof(b) - 1, "[look] player %u's character: name='%s' race='%s' %s",
               (unsigned)cl.senderId, cl.name.c_str(), cl.race.c_str(), ok ? "applied" : "FAILED");
@@ -1118,7 +1142,11 @@ void applyLookFromHost(GameWorld* gw, const coop::InboundCharLook& cl) {
     fclose(f);
     unsigned int hand[5];
     for (int i = 0; i < 5; ++i) hand[i] = cl.hdr.hand[i];
+    logLookPos(gw, hand, "before apply");
     bool ok = coop::engine::importCharacterLook(gw, hand, LOOK_IN_FILE, cl.name, cl.race);
+    logLookPos(gw, hand, "after apply");
+    memcpy(g_lookPosLaterHand, hand, sizeof(hand));
+    g_lookPosLaterTick = GetTickCount();
     char b[192];
     _snprintf(b, sizeof(b) - 1, "[look] %s's new look: name='%s' race='%s' %s",
               playerName(cl.hdr.target).c_str(), cl.name.c_str(), cl.race.c_str(), ok ? "applied" : "FAILED");
@@ -1230,9 +1258,14 @@ void tickLook(GameWorld* gw) {
             g_lookEditing = true; g_lookSeenOpen = false; g_lookOpenTick = now;
             g_lookUnlocked = false;
             coopLog("[look] character editor opened");
+            logLookPos(gw, g_lookHand, "editor opened");
         } else {
             coopErr("[look] character editor FAILED to open");
         }
+    }
+    if (g_lookPosLaterTick != 0 && now - g_lookPosLaterTick > 5000) {
+        g_lookPosLaterTick = 0;
+        logLookPos(gw, g_lookPosLaterHand, "5 s later");
     }
     if (g_lookEditing) {
         int st = coop::engine::characterEditorOpen(gw);
@@ -1244,6 +1277,9 @@ void tickLook(GameWorld* gw) {
         if (st == 0 && g_lookSeenOpen) {
             g_lookEditing = false;
             coopLog("[look] character editor closed");
+            logLookPos(gw, g_lookHand, "editor closed");
+            memcpy(g_lookPosLaterHand, g_lookHand, sizeof(g_lookHand));
+            g_lookPosLaterTick = now;
             if (!g_cfg.isHost) {
                 if (g_peerPresent) sendLookApply(gw);
             } else if (g_peerPresent) {
