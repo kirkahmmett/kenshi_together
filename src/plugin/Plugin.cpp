@@ -23,6 +23,7 @@
 
 #include <windows.h>
 #include <shlobj.h>                  // SHGetFolderPathA (problem report -> Desktop)
+#include <psapi.h>                   // PROCESS_MEMORY_COUNTERS (struct only; the call is resolved at run time)
 #pragma comment(lib, "shell32.lib")
 #include <cstdio>
 #include <string>
@@ -1375,6 +1376,43 @@ void tickResync() {
     g_inbound.drainResyncReqs(got);
     if (!g_cfg.isHost) return;
     for (std::deque<coop::u32>::iterator it = got.begin(); it != got.end(); ++it) hostResync(*it);
+    // Test lever (KENSHICOOP_RELOAD_LOOP=N, N >= 30): the host resyncs everyone
+    // every N s once the last load settled - the "crash on the 4th reload" report.
+    static int loopS = -1;
+    static DWORD loopLast = 0;
+    static int loopN = 0;
+    if (loopS < 0) { const char* e = getenv("KENSHICOOP_RELOAD_LOOP"); loopS = (e && e[0]) ? atoi(e) : 0; }
+    DWORD now = GetTickCount();
+    if (loopS >= 30 && g_peerPresent && g_gameStarted && g_readyWait.empty() &&
+        now - g_gameStartTick >= (DWORD)loopS * 1000u && now - g_lastWorldResetTick >= (DWORD)loopS * 1000u &&
+        (loopLast == 0 || now - loopLast >= (DWORD)loopS * 1000u)) {
+        loopLast = now;
+        char b[64];
+        _snprintf(b, sizeof(b) - 1, "[resync] TEST: reload loop #%d", ++loopN);
+        b[sizeof(b) - 1] = '\0'; coopLog(b);
+        g_resyncTick = 0;
+        hostResync(0);
+    }
+}
+
+// One line per world load: this process's memory and the machine's commit -
+// a slow climb across reloads is a leak, a cliff is the machine running out.
+void logMemoryLine(const char* tag) {
+    typedef BOOL (WINAPI* GetPmiFn)(HANDLE, PROCESS_MEMORY_COUNTERS*, DWORD);
+    static GetPmiFn getPmi = (GetPmiFn)GetProcAddress(GetModuleHandleA("kernel32.dll"), "K32GetProcessMemoryInfo");
+    PROCESS_MEMORY_COUNTERS pmc;
+    memset(&pmc, 0, sizeof(pmc));
+    pmc.cb = sizeof(pmc);
+    if (getPmi) getPmi(GetCurrentProcess(), &pmc, sizeof(pmc));
+    MEMORYSTATUSEX ms;
+    ms.dwLength = sizeof(ms);
+    GlobalMemoryStatusEx(&ms);
+    char b[200];
+    _snprintf(b, sizeof(b) - 1, "[mem] %s: process %.0f MB (peak %.0f, commit %.0f MB), machine commit %.1f GB free of %.1f",
+              tag, pmc.WorkingSetSize / 1048576.0, pmc.PeakWorkingSetSize / 1048576.0,
+              pmc.PagefileUsage / 1048576.0, ms.ullAvailPageFile / 1073741824.0,
+              ms.ullTotalPageFile / 1073741824.0);
+    b[sizeof(b) - 1] = '\0'; coopLog(b);
 }
 
 // Problem report: copy this client's logs into a fresh Desktop folder the player
@@ -2653,6 +2691,7 @@ void tickWorldSwapEdge(GameWorld* gw) {
                           "[load] WORLD-RELOAD swapMs=%lu hookTicksDuringSwap=%u",
                           (unsigned long)swapMs, (unsigned)g_swapHookTicks);
                 b[sizeof(b) - 1] = '\0'; coopLog(b);
+                logMemoryLine("world reloaded");
                 // Session reset (protocol 32): centralized order (repl maps then
                 // inbound queues). Peer presence + suppression levers survive.
                 if (g_cfg.loadSync)
@@ -3362,6 +3401,7 @@ void mainLoop_hook(GameWorld* gw, float dt) {
         g_gameStarted   = true;
         g_gameStartTick = GetTickCount();
         coopLog("KenshiCoop: gameplay started");
+        logMemoryLine("world loaded");
         sendLoadReady();
         // Coordinated load (protocol 32): the title-screen auto-load fired the
         // load detour BEFORE gameplay - discard its queued edge here, or the
