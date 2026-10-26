@@ -439,6 +439,10 @@ void startReadyWait(coop::u32 loadId, coop::u32 target = 0) {
     coopLog(b);
 }
 
+// After a load the camera sits on the save's selected character - the host's.
+// A join points it at its own character once that is known (retried ~10 s).
+DWORD g_focusMineTick = 0;
+
 // Join: tell the host we are back in gameplay after its LOAD_GO.
 void sendLoadReady() {
     if (g_cfg.isHost || !g_peerPresent || g_loadIdSeen == 0) return;
@@ -448,6 +452,7 @@ void sendLoadReady() {
     r.ownerId = g_net.localId();
     r.loadId  = g_loadIdSeen;
     g_net.queueLoadReady(r);
+    g_focusMineTick = GetTickCount();
     char b[80];
     _snprintf(b, sizeof(b) - 1, "[ready] loaded GO id=%u - told the host", (unsigned)g_loadIdSeen);
     b[sizeof(b) - 1] = '\0';
@@ -1088,6 +1093,19 @@ void logLookPos(GameWorld* gw, const unsigned int h[5], const char* tag) {
 unsigned int g_lookPosLaterHand[5];
 DWORD        g_lookPosLaterTick = 0;
 
+void hostResync(coop::u32 askedBy); // below
+extern DWORD g_resyncTick;         // below
+std::string playerName(coop::u32 id); // below
+// Host: one resync after a character edit, past the resync rate limits.
+void resyncAfterLook(coop::u32 editor) {
+    char b[128];
+    _snprintf(b, sizeof(b) - 1, "[look] %s finished editing - resyncing once so everyone sees it",
+              playerName(editor).c_str());
+    b[sizeof(b) - 1] = '\0'; coopLog(b);
+    g_resyncTick = 0;
+    hostResync(0);
+}
+
 // Host: a player's edited character. Only their own squad may be changed.
 void applyLook(GameWorld* gw, const coop::InboundCharLook& cl) {
     std::map<coop::u32, std::string>::const_iterator nm = g_names.find(cl.senderId);
@@ -1124,12 +1142,15 @@ void applyLook(GameWorld* gw, const coop::InboundCharLook& cl) {
     b[sizeof(b) - 1] = '\0';
     coopLog(b);
     if (ok) {
-        // v66: no save and no world reload - the look goes to every join, which
-        // applies it to its own copy. The host's next save carries it.
+        // v66: the look goes to every join, which applies it to its own copy...
         coop::CharLookHeader h = cl.hdr;
         h.ownerId = g_net.localId();
         h.target  = cl.senderId;
         g_net.queueCharLook(h, cl.name, cl.race, cl.data);
+        // ...but a live copy does not redraw the model (field test 2026-10-26),
+        // so one resync follows every finished edit: everyone loads the saved
+        // world that carries the new look.
+        resyncAfterLook(cl.senderId);
     }
 }
 
@@ -1266,6 +1287,16 @@ void tickLook(GameWorld* gw) {
             coopErr("[look] character editor FAILED to open");
         }
     }
+    if (g_focusMineTick != 0 && now - g_focusMineTick > 1000) {
+        unsigned int mine[5];
+        if (myCharacterHand(gw, mine) && coop::engine::cameraFocusOnHand(gw, mine)) {
+            g_focusMineTick = 0;
+            coopLog("[load] camera on my character");
+        } else if (now - g_focusMineTick > 10000) {
+            g_focusMineTick = 0;
+            coopLog("[load] my character not found - camera left where the load put it");
+        }
+    }
     if (g_lookPosLaterTick != 0 && now - g_lookPosLaterTick > 5000) {
         g_lookPosLaterTick = 0;
         logLookPos(gw, g_lookPosLaterHand, "5 s later");
@@ -1286,7 +1317,8 @@ void tickLook(GameWorld* gw) {
             if (!g_cfg.isHost) {
                 if (g_peerPresent) sendLookApply(gw);
             } else if (g_peerPresent) {
-                broadcastOwnLook(); // the host's own edit: every join applies it live
+                broadcastOwnLook(); // the host's own edit: every join applies it...
+                resyncAfterLook(g_net.localId()); // ...and one resync redraws it everywhere
             }
         } else if (!g_lookSeenOpen && now - g_lookOpenTick > 5000) {
             g_lookEditing = false;
