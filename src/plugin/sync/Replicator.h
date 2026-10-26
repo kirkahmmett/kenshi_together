@@ -74,6 +74,11 @@ public:
     // authority transfer (architecture review 2026-07-10); 0 restores the
     // legacy release-on-stale behavior.
     void setStarveHold(unsigned long ms) { starveHoldMs_ = ms; }
+    // Character editor (2026-10-27): the new-game editor parks the edited body at
+    // the world origin while it is open. Publish it at the position it had when
+    // the editor opened instead, or the peers' copies (and the host's next save)
+    // put it there. on=false lifts the pin.
+    void setPublishPin(bool on, const unsigned int h[5], float x, float y, float z);
 
     // Bidirectional presence: the SQUAD-TAB ranks (distinct hand-containers, sorted)
     // this client OWNS (controls locally + streams). The peer owns the other tabs and

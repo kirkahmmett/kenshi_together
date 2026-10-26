@@ -221,6 +221,23 @@ bool cameraFocusOnHand(GameWorld* gw, const unsigned int hand[5]) {
     return c ? cameraFocusOn(gw, c) : false;
 }
 
+// Leave the world when the host is gone: close the game window the way its X
+// button does. GameWorld::resetGame from the main-loop hook faulted in the
+// renderer 0.2 s later (2026-10-27), and Kenshi exposes no quit-to-menu call.
+static BOOL CALLBACK closeOwnWindow(HWND w, LPARAM found) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(w, &pid);
+    if (pid != GetCurrentProcessId() || !IsWindowVisible(w) || GetWindow(w, GW_OWNER)) return TRUE;
+    PostMessageA(w, WM_CLOSE, 0, 0);
+    *(bool*)found = true;
+    return FALSE;
+}
+bool closeGameWindow() {
+    bool found = false;
+    EnumWindows(closeOwnWindow, (LPARAM)&found);
+    return found;
+}
+
 int characterEditorOpen(GameWorld* gw) {
     if (!gw) return -1;
     __try {

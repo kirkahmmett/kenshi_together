@@ -356,7 +356,10 @@ bool          g_lookWanted   = false;   // open the editor when the world is set
 DWORD         g_lookWantTick = 0;
 bool          g_lookEditing  = false;   // our editor is open (or opening)
 bool          g_lookSeenOpen = false;
-bool          g_lookUnlocked = false;   // race/gender arrows enabled in the open editor
+bool          g_lookUnlocked = false;
+bool          g_lookPinOk = false;       // the edited body's pre-editor position is known
+float         g_lookPinPos[3] = { 0, 0, 0 };
+DWORD         g_lookPinUntil = 0;        // lift the publish pin at this tick   // race/gender arrows enabled in the open editor
 DWORD         g_lookOpenTick = 0;
 unsigned int  g_lookHand[5]  = { 0, 0, 0, 0, 0 };
 DWORD         g_lastWorldResetTick = 0;
@@ -438,6 +441,9 @@ void startReadyWait(coop::u32 loadId, coop::u32 target = 0) {
     b[sizeof(b) - 1] = '\0';
     coopLog(b);
 }
+
+// Join: when the host went away mid-game (0 = not pending).
+DWORD g_hostGoneTick = 0;
 
 // After a load the camera sits on the save's selected character - the host's.
 // A join points it at its own character once that is known (retried ~10 s).
@@ -1090,6 +1096,21 @@ void logLookPos(GameWorld* gw, const unsigned int h[5], const char* tag) {
     _snprintf(b, sizeof(b) - 1, "[look] pos %s: character not in the squad", tag);
     b[sizeof(b) - 1] = '\0'; coopLog(b);
 }
+// Where this client has a squad character right now (false: not in the squad).
+bool squadCharPos(GameWorld* gw, const unsigned int h[5], float out[3]) {
+    coop::EntityState sq[64];
+    unsigned int n = coop::engine::captureSquad(gw, /*leaderOnly*/ false, sq, 64);
+    for (unsigned int i = 0; i < n; ++i) {
+        if (sq[i].hType != h[0] || sq[i].hContainer != h[1] || sq[i].hContainerSerial != h[2] ||
+            sq[i].hIndex != h[3] || sq[i].hSerial != h[4]) continue;
+        out[0] = sq[i].x; out[1] = sq[i].y; out[2] = sq[i].z;
+        return true;
+    }
+    return false;
+}
+// The new-game editor parks the body at the world origin; a position this
+// close to it is the editor's, never the world's.
+bool posInWorld(const float p[3]) { return fabs(p[0]) + fabs(p[2]) > 50.0f; }
 unsigned int g_lookPosLaterHand[5];
 DWORD        g_lookPosLaterTick = 0;
 
@@ -1097,10 +1118,28 @@ void hostResync(coop::u32 askedBy); // below
 extern DWORD g_resyncTick;         // below
 std::string playerName(coop::u32 id); // below
 // Host: one resync after a character edit, past the resync rate limits.
-void resyncAfterLook(coop::u32 editor) {
-    char b[128];
-    _snprintf(b, sizeof(b) - 1, "[look] %s finished editing - resyncing once so everyone sees it",
-              playerName(editor).c_str());
+// The save is taken only once the edited character stands in the world again
+// on the host: saved at the editor's spot, everyone reloads it there (the
+// post-edit teleport, 2026-10-27). tickLookResync fires it.
+DWORD        g_lookResyncAt = 0;
+coop::u32    g_lookResyncEditor = 0;
+unsigned int g_lookResyncHand[5];
+void resyncAfterLook(coop::u32 editor, const unsigned int hand[5]) {
+    if (getenv("KENSHICOOP_LOOK_NORESYNC")) { coopLog("[look] TEST: resync after edit skipped"); return; }
+    g_lookResyncAt = GetTickCount();
+    g_lookResyncEditor = editor;
+    memcpy(g_lookResyncHand, hand, sizeof(g_lookResyncHand));
+}
+void tickLookResync(GameWorld* gw, DWORD now) {
+    if (g_lookResyncAt == 0 || now - g_lookResyncAt < 1500) return;
+    float p[3] = { 0, 0, 0 };
+    bool have = squadCharPos(gw, g_lookResyncHand, p);
+    bool late = now - g_lookResyncAt > 15000;
+    if (have && !posInWorld(p) && !late) return; // still at the editor's spot: wait for the stream
+    g_lookResyncAt = 0;
+    char b[200];
+    _snprintf(b, sizeof(b) - 1, "[look] %s finished editing - resyncing once so everyone sees it (at %.0f,%.0f,%.0f%s)",
+              playerName(g_lookResyncEditor).c_str(), p[0], p[1], p[2], late ? ", waited too long" : "");
     b[sizeof(b) - 1] = '\0'; coopLog(b);
     g_resyncTick = 0;
     hostResync(0);
@@ -1150,7 +1189,7 @@ void applyLook(GameWorld* gw, const coop::InboundCharLook& cl) {
         // ...but a live copy does not redraw the model (field test 2026-10-26),
         // so one resync follows every finished edit: everyone loads the saved
         // world that carries the new look.
-        resyncAfterLook(cl.senderId);
+        resyncAfterLook(cl.senderId, hand);
     }
 }
 
@@ -1278,13 +1317,39 @@ void tickLook(GameWorld* gw) {
         g_lookWanted = false;
         if (!myCharacterHand(gw, g_lookHand)) {
             coopLog("[look] no character of mine found - editor not opened");
-        } else if (coop::engine::openCharacterEditor(gw, g_lookHand)) {
+        } else if ((g_lookPinOk = squadCharPos(gw, g_lookHand, g_lookPinPos) && posInWorld(g_lookPinPos)),
+                   coop::engine::openCharacterEditor(gw, g_lookHand)) {
             g_lookEditing = true; g_lookSeenOpen = false; g_lookOpenTick = now;
             g_lookUnlocked = false;
             coopLog("[look] character editor opened");
             logLookPos(gw, g_lookHand, "editor opened");
+            if (g_lookPinOk) g_repl.setPublishPin(true, g_lookHand, g_lookPinPos[0], g_lookPinPos[1], g_lookPinPos[2]);
         } else {
             coopErr("[look] character editor FAILED to open");
+        }
+    }
+    // Test lever: every second, where this client has every other player's
+    // character (the post-edit teleport hunt, 2026-10-27).
+    static DWORD posDiagTick = 0;
+    if (getenv("KENSHICOOP_LOOK_TEST") && now - posDiagTick > 1000) {
+        posDiagTick = now;
+        coop::EntityState sq[64];
+        unsigned int n = coop::engine::captureSquad(gw, /*leaderOnly*/ false, sq, 64);
+        for (unsigned int i = 0; i < n; ++i) {
+            unsigned int h[5] = { sq[i].hType, sq[i].hContainer, sq[i].hContainerSerial, sq[i].hIndex, sq[i].hSerial };
+            if (g_repl.ownerClassForHand(h) != 2) continue;
+            char b[128];
+            _snprintf(b, sizeof(b) - 1, "[look] posdiag %u: %.1f,%.1f,%.1f", h[4], sq[i].x, sq[i].y, sq[i].z);
+            b[sizeof(b) - 1] = '\0'; coopLog(b);
+        }
+    }
+    if (g_hostGoneTick != 0 && now - g_hostGoneTick > 5000) {
+        g_hostGoneTick = 0;
+        if (g_peerPresent) {
+            coopLog("[leave] the host is back - staying in the world");
+        } else {
+            bool ok = coop::engine::closeGameWindow();
+            coopLog(ok ? "[leave] closing the game window" : "[leave] could NOT find the game window");
         }
     }
     if (g_focusMineTick != 0 && now - g_focusMineTick > 1000) {
@@ -1297,6 +1362,11 @@ void tickLook(GameWorld* gw) {
             coopLog("[load] my character not found - camera left where the load put it");
         }
     }
+    if (g_lookPinUntil != 0 && now >= g_lookPinUntil) {
+        g_lookPinUntil = 0;
+        g_repl.setPublishPin(false, 0, 0, 0, 0);
+    }
+    if (g_cfg.isHost) tickLookResync(gw, now);
     if (g_lookPosLaterTick != 0 && now - g_lookPosLaterTick > 5000) {
         g_lookPosLaterTick = 0;
         logLookPos(gw, g_lookPosLaterHand, "5 s later");
@@ -1311,6 +1381,7 @@ void tickLook(GameWorld* gw) {
         if (st == 0 && g_lookSeenOpen) {
             g_lookEditing = false;
             coopLog("[look] character editor closed");
+            g_lookPinUntil = now + 2000; // the body is back; let the stream catch up first
             logLookPos(gw, g_lookHand, "editor closed");
             memcpy(g_lookPosLaterHand, g_lookHand, sizeof(g_lookHand));
             g_lookPosLaterTick = now;
@@ -1318,11 +1389,12 @@ void tickLook(GameWorld* gw) {
                 if (g_peerPresent) sendLookApply(gw);
             } else if (g_peerPresent) {
                 broadcastOwnLook(); // the host's own edit: every join applies it...
-                resyncAfterLook(g_net.localId()); // ...and one resync redraws it everywhere
+                resyncAfterLook(g_net.localId(), g_lookHand); // ...and one resync redraws it everywhere
             }
         } else if (!g_lookSeenOpen && now - g_lookOpenTick > 5000) {
             g_lookEditing = false;
             coopErr("[look] character editor never opened - giving up");
+            g_repl.setPublishPin(false, 0, 0, 0, 0);
         }
     }
 }
@@ -2014,6 +2086,14 @@ void processNetEvents(GameWorld* gw) {
         if (hostGone && g_cfg.saveSync) {
             coop::engine::setSaveSuppress(false);
             coopLog("[save] JOIN save suppression OFF (peer left)");
+        }
+        // The host closed the game (or dropped): the world here has nobody to
+        // follow and nothing to save into, so the join leaves it (2026-10-27).
+        if (hostGone && g_gameStarted && g_hostGoneTick == 0) {
+            g_hostGoneTick = GetTickCount();
+            uiNotice("The host left the game - the session is over, Kenshi closes in 5 seconds");
+            coopLog("[leave] the host is gone - closing the game in 5 s");
+            coop::engine::writeGameSpeed(gw, 1.0f, true); // pause: nothing happens to the squad meanwhile
         }
     }
     // Phase 2 crash hardening: a peer drop leaves this side's minted proxies

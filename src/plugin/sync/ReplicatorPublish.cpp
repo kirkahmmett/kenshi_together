@@ -13,6 +13,16 @@
 
 namespace coop {
 
+static bool         s_pubPin = false;
+static unsigned int s_pubPinH[5];
+static float        s_pubPinPos[3];
+void Replicator::setPublishPin(bool on, const unsigned int h[5], float x, float y, float z) {
+    s_pubPin = on && h;
+    if (!s_pubPin) return;
+    for (int i = 0; i < 5; ++i) s_pubPinH[i] = h[i];
+    s_pubPinPos[0] = x; s_pubPinPos[1] = y; s_pubPinPos[2] = z;
+}
+
 void Replicator::publishOwned(GameWorld* gw, NetLink& net, u32 ownerId) {
     localId_ = ownerId;   // the drive path reads it; see the host-side guard
     // Capture the OWNED squad subset first, then (Stage 4) the nearby world NPCs.
@@ -32,6 +42,13 @@ void Replicator::publishOwned(GameWorld* gw, NetLink& net, u32 ownerId) {
     // one-directional behaviour is preserved exactly. ownHands_ records owned keys
     // for the drive-exclusion guard.
     unsigned int nSquad = engine::captureSquad(gw, /*leaderOnly*/ false, raw, MAX_PUBLISH);
+    for (unsigned int i = 0; s_pubPin && i < nSquad; ++i) {
+        EntityState& e = raw[i];
+        if (e.hType != s_pubPinH[0] || e.hContainer != s_pubPinH[1] || e.hContainerSerial != s_pubPinH[2] ||
+            e.hIndex != s_pubPinH[3] || e.hSerial != s_pubPinH[4]) continue;
+        e.x = s_pubPinPos[0]; e.y = s_pubPinPos[1]; e.z = s_pubPinPos[2];
+        e.cSpeed = 0; e.cMotionX = e.cMotionY = e.cMotionZ = 0; e.cMoving = 0;
+    }
     std::vector<std::pair<u32, u32> > ctnrs; // distinct squad-tab containers, sorted
     ctnrs.reserve(nSquad);
     for (unsigned int i = 0; i < nSquad; ++i)
