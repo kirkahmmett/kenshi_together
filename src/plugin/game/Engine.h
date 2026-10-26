@@ -833,7 +833,8 @@ bool closeCharacterEditor(GameWorld* gw); // test lever: PlayerInterface::setCha
 bool unlockCharacterEditor();
 // Test lever: press the editor's "next race" arrow; returns the race sid after.
 bool editorClickNextRace(char* raceSid, unsigned int len);
-bool editorPressConfirm(int step); // test lever: 0 = Confirm button, 1 = its "yes"
+bool editorPressConfirm(int step);
+bool cameraFocusOnHand(GameWorld* gw, const unsigned int hand[5]); // test lever: look at a character // test lever: 0 = Confirm button, 1 = its "yes"
 
 bool exportCharacterLook(const unsigned int hand[5], const std::string& path,
                          std::string& name, std::string& raceSid);

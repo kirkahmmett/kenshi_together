@@ -11,6 +11,7 @@
 // (see resources/CODE_MAP.md).
 
 #include "EngineInternal.h"
+#include <kenshi/Appearance.h> // AppearanceBase::reload (live look, v66)
 #include <kenshi/RaceData.h> // Character::myRace->data (character editor, v60)
 #include <kenshi/gui/ForgottenGUI.h> // ForgottenGUI::closeCharacterEditor
 #include <kenshi/gui/CharacterEditWindow.h> // isMidGame / raceLimits / arrow buttons
@@ -139,6 +140,11 @@ static GdLoadFileFn    g_gdLoadFileFn = 0;
 static SetRaceFn       g_setRaceFn = 0;
 static SetNameFn       g_setNameFn = 0;
 static GdmGetDataFn    g_gdmGetDataFn = 0;
+typedef void (__fastcall* AppReloadFn)(AppearanceBase* self);
+static AppReloadFn     g_appReloadFn = 0;
+typedef AppearanceBase* (__fastcall* GetAppFn)(Character* self);
+static GetAppFn        g_getAppFn = 0;
+static bool            g_lookNoRedraw = false; // test lever KENSHICOOP_LOOK_NOREDRAW=1: the old behaviour
 static bool resolveLookFns() {
     if (!g_activateEditFn)
         g_activateEditFn = (ActivateEditFn)KenshiLib::GetRealAddress(&PlayerInterface::activateCharacterEditMode);
@@ -152,6 +158,10 @@ static bool resolveLookFns() {
         g_setRaceFn = (SetRaceFn)KenshiLib::GetRealAddress(&Character::_NV_setRace);
     if (!g_setNameFn)
         g_setNameFn = (SetNameFn)KenshiLib::GetRealAddress(&Character::_NV_setName);
+    if (!g_getAppFn)
+        g_getAppFn = (GetAppFn)KenshiLib::GetRealAddress(&Character::getAppearance);
+    if (!g_appReloadFn)
+        g_appReloadFn = (AppReloadFn)KenshiLib::GetRealAddress(&AppearanceBase::reload);
     if (!g_gdmGetDataFn)
         g_gdmGetDataFn = (GdmGetDataFn)KenshiLib::GetRealAddress(
             static_cast<GameData* (GameDataManager::*)(const std::string&, itemType)>(&GameDataManager::getData));
@@ -204,6 +214,11 @@ bool openCharacterEditor(GameWorld* gw, const unsigned int hand[5]) {
     bool ok = openEditorSeh(gw, c);
     g_editorNewGame = false;
     return ok;
+}
+
+bool cameraFocusOnHand(GameWorld* gw, const unsigned int hand[5]) {
+    Character* c = hand ? lookChar(hand) : 0;
+    return c ? cameraFocusOn(gw, c) : false;
 }
 
 int characterEditorOpen(GameWorld* gw) {
@@ -360,6 +375,12 @@ static int lookLoadSeh(GameWorld* gw, Character* c, const std::string* path,
         GameDataCopyStandalone* ad = g_getAppearanceFn(c);
         if (ad && g_gdLoadFileFn(ad, path, ad->type)) steps |= 2;
         if (name->size() > 0) { g_setNameFn(c, name); steps |= 4; }
+        // The data alone changes nothing on screen until the next world load
+        // (field test 2026-10-26): rebuild the model from it now.
+        if ((steps & 3) && g_appReloadFn && !g_lookNoRedraw) {
+            AppearanceBase* app = g_getAppFn ? g_getAppFn(c) : 0;
+            if (app) { g_appReloadFn(app); steps |= 8; }
+        }
     } __except (EXCEPTION_EXECUTE_HANDLER) { steps |= 0x100; }
     return steps;
 }
@@ -368,10 +389,12 @@ bool importCharacterLook(GameWorld* gw, const unsigned int hand[5], const std::s
     if (!gw || !hand || !resolveLookFns()) return false;
     Character* c = lookChar(hand);
     if (!c) return false;
+    const char* nr = getenv("KENSHICOOP_LOOK_NOREDRAW");
+    g_lookNoRedraw = nr && nr[0] == '1';
     int st = lookLoadSeh(gw, c, &path, &name, &raceSid);
     char b[128];
-    _snprintf(b, sizeof(b) - 1, "[look] import race=%d appearance=%d name=%d fault=%d",
-              (st & 1) ? 1 : 0, (st & 2) ? 1 : 0, (st & 4) ? 1 : 0, (st & 0x100) ? 1 : 0);
+    _snprintf(b, sizeof(b) - 1, "[look] import race=%d appearance=%d name=%d redraw=%d fault=%d",
+              (st & 1) ? 1 : 0, (st & 2) ? 1 : 0, (st & 4) ? 1 : 0, (st & 8) ? 1 : 0, (st & 0x100) ? 1 : 0);
     b[sizeof(b) - 1] = '\0';
     coop::logLine(b);
     return (st & 2) != 0 && (st & 0x100) == 0;

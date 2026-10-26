@@ -1115,6 +1115,7 @@ void applyLook(GameWorld* gw, const coop::InboundCharLook& cl) {
     logLookPos(gw, hand, "before apply");
     bool ok = coop::engine::importCharacterLook(gw, hand, LOOK_IN_FILE, cl.name, cl.race);
     logLookPos(gw, hand, "after apply");
+    if (getenv("KENSHICOOP_LOOK_TEST")) coop::engine::cameraFocusOnHand(gw, hand); // so a screenshot shows it
     memcpy(g_lookPosLaterHand, hand, sizeof(hand));
     g_lookPosLaterTick = GetTickCount();
     char b[192];
@@ -1146,6 +1147,7 @@ void applyLookFromHost(GameWorld* gw, const coop::InboundCharLook& cl) {
     logLookPos(gw, hand, "before apply");
     bool ok = coop::engine::importCharacterLook(gw, hand, LOOK_IN_FILE, cl.name, cl.race);
     logLookPos(gw, hand, "after apply");
+    if (getenv("KENSHICOOP_LOOK_TEST")) coop::engine::cameraFocusOnHand(gw, hand); // so a screenshot shows it
     memcpy(g_lookPosLaterHand, hand, sizeof(hand));
     g_lookPosLaterTick = GetTickCount();
     char b[192];
