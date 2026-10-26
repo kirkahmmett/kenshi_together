@@ -111,7 +111,7 @@ static void testSizes() {
     CHECK_EQ("sizeof(SaveFileHeader)",          sizeof(SaveFileHeader),          19);
     CHECK_EQ("sizeof(SaveDoneHeader)",          sizeof(SaveDoneHeader),          11);
     CHECK_EQ("sizeof(SaveAckPacket)",           sizeof(SaveAckPacket),           20);
-    CHECK_EQ("sizeof(LoadGoPacket)",            sizeof(LoadGoPacket),            61);
+    CHECK_EQ("sizeof(LoadGoPacket)",            sizeof(LoadGoPacket),            65); // v66: + target
     CHECK_EQ("sizeof(LoadReqPacket)",           sizeof(LoadReqPacket),           57);
     CHECK_EQ("sizeof(LoadNackPacket)",          sizeof(LoadNackPacket),          61);
     CHECK_EQ("sizeof(ProdPacket)",              sizeof(ProdPacket),              109);

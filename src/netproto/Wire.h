@@ -1458,6 +1458,10 @@ struct LoadGoPacket {
     u32  loadId;      // per-host monotonic load id (stale-NACK guard)
     u32  fingerprint; // folder fingerprint of the host's copy (0 = unknown)
     char name[48];    // save name ('\0'-padded)
+    // v66: who should load (0 = every join). A player who joins or comes back
+    // to a tab that already exists only needs the world themselves - the rest
+    // keep playing instead of downloading the save and sitting in a load screen.
+    u32  target;
 };
 
 // Join -> host: "my player pressed load" (the join's local load was

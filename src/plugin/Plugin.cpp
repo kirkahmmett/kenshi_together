@@ -424,10 +424,10 @@ coop::u32           g_readyLoadId = 0;
 DWORD               g_readyStart  = 0;
 const DWORD         READY_TIMEOUT_MS = 90000;
 
-void startReadyWait(coop::u32 loadId) {
+void startReadyWait(coop::u32 loadId, coop::u32 target = 0) {
     g_readyWait.clear();
     for (std::set<coop::u32>::const_iterator it = g_peers.begin(); it != g_peers.end(); ++it)
-        if (*it != 0) g_readyWait.insert(*it);
+        if (*it != 0 && (target == 0 || *it == target)) g_readyWait.insert(*it);
     if (g_readyWait.empty()) return;
     g_readyLoadId = loadId;
     g_readyStart  = GetTickCount();
@@ -991,7 +991,12 @@ void sessionResetForWorldReload() {
 // the host is already in-game (processNetEvents), or the host's gameplay
 // starting with a peer already connected (mainLoop_hook gameplay-start edge).
 // Host + saveSync + in-game are the caller's responsibility.
-void armConnectPush() {
+// Who the next connect-push GO is for (v66): the one player who just joined,
+// or 0 = everyone (a second newcomer while a push is pending, the host's
+// gameplay start, or a world reload the host itself needs).
+coop::u32 g_pushTarget = 0;
+void armConnectPush(coop::u32 newcomer = 0) {
+    g_pushTarget = (g_bootstrapArmed && g_pushTarget != newcomer) ? 0 : newcomer;
     // Every connected player gets a named tab first: it rides in this save.
     ingestRoster();
     if (assignSquads(g_lastGw)) g_bootReloadHost = true;
@@ -1239,9 +1244,14 @@ void tickLook(GameWorld* gw) {
 // ---- Resync (protocol 61) and problem report ----------------------------------
 // Resync: the host saves the live world and every client reloads it (the same
 // coordinated reload a new player's squad uses). A join asks with
-// PKT_RESYNC_REQ. One every RESYNC_MIN_MS, so a stuck button cannot loop it.
+// PKT_RESYNC_REQ. A whole-session reload stalls everyone on a load screen, so
+// a JOIN's request is honoured at most once every JOIN_RESYNC_MIN_MS (players'
+// choice, 2026-10-26); the host's own button only has the short RESYNC_MIN_MS
+// guard against double presses - it is the way out of a broken session.
 DWORD       g_resyncTick = 0;
+DWORD       g_joinResyncTick = 0;
 const DWORD RESYNC_MIN_MS = 30000;
+const DWORD JOIN_RESYNC_MIN_MS = 600000;
 std::string g_uiNotice;
 DWORD       g_uiNoticeTick = 0;
 const DWORD UI_NOTICE_MS = 8000;
@@ -1255,6 +1265,18 @@ void hostResync(coop::u32 askedBy) {
         coopLog("[resync] not available (no save sync or not in a game)");
         return;
     }
+    if (askedBy != 0 && g_joinResyncTick != 0 && now - g_joinResyncTick < JOIN_RESYNC_MIN_MS) {
+        unsigned long left = (JOIN_RESYNC_MIN_MS - (now - g_joinResyncTick)) / 60000 + 1;
+        _snprintf(b, sizeof(b) - 1, "[resync] request from player %u held back (%lu min left)",
+                  (unsigned)askedBy, left);
+        b[sizeof(b) - 1] = '\0'; coopLog(b);
+        char nb[128];
+        _snprintf(nb, sizeof(nb) - 1, " asked for a resync - the next join resync is in %lu min "
+                  "(your own Resync button works any time)", left);
+        nb[sizeof(nb) - 1] = '\0';
+        uiNotice(playerName(askedBy) + nb);
+        return;
+    }
     if (g_resyncTick != 0 && now - g_resyncTick < RESYNC_MIN_MS) {
         _snprintf(b, sizeof(b) - 1, "[resync] request from player %u ignored (one every %lu s)",
                   (unsigned)askedBy, (unsigned long)(RESYNC_MIN_MS / 1000));
@@ -1262,6 +1284,7 @@ void hostResync(coop::u32 askedBy) {
         return;
     }
     g_resyncTick = now;
+    if (askedBy != 0) g_joinResyncTick = now;
     _snprintf(b, sizeof(b) - 1, "[resync] player %u asked - saving and reloading everyone", (unsigned)askedBy);
     b[sizeof(b) - 1] = '\0'; coopLog(b);
     uiNotice("Resync: everyone reloads the host's world");
@@ -1839,7 +1862,7 @@ void processNetEvents(GameWorld* gw) {
         // host is NOT yet in-game (title/loading), the gameplay-start edge in
         // mainLoop_hook arms this instead - covers either connect ordering.
         if (g_cfg.isHost && g_cfg.saveSync && g_gameStarted)
-            armConnectPush();
+            armConnectPush(*it);
     }
     for (std::deque<coop::u32>::iterator it = leaves.begin(); it != leaves.end(); ++it) {
         char b[64];
@@ -2031,13 +2054,17 @@ void driveSaveSync() {
                     go.loadId      = ++g_loadIdOut;
                     go.fingerprint = coop::savexfer::folderFingerprint(g_bootstrapName);
                     strncpy(go.name, g_bootstrapName.c_str(), sizeof(go.name) - 1);
+                    // No character was created, so only the newcomer needs this
+                    // world; everyone else keeps playing (v66).
+                    go.target      = g_pushTarget;
+                    g_pushTarget   = 0;
                     g_net.queueLoadGo(go);
-                    startReadyWait(go.loadId);
+                    startReadyWait(go.loadId, go.target);
                     g_loadPumpArmTick = GetTickCount();
                     char b2[192];
                     _snprintf(b2, sizeof(b2) - 1,
-                              "[boot] GO->join id=%u name='%s' fp=%08x (push on connect)",
-                              go.loadId, g_bootstrapName.c_str(), go.fingerprint);
+                              "[boot] GO->join id=%u name='%s' fp=%08x target=%u (push on connect)",
+                              go.loadId, g_bootstrapName.c_str(), go.fingerprint, (unsigned)go.target);
                     b2[sizeof(b2) - 1] = '\0'; coopLog(b2);
                     warnIfNoPortraits(g_bootstrapName);
                     g_bootstrapArmed = false;
@@ -2239,6 +2266,15 @@ void driveLoadSync(GameWorld* gw) {
         for (std::deque<coop::InboundLoadGo>::iterator it = gos.begin();
              it != gos.end(); ++it) {
             if (it->pkt.loadId <= g_loadIdSeen) continue; // stale/duplicate
+            if (it->pkt.target != 0 && it->pkt.target != g_net.localId()) {
+                // v66: a world for another (new or returning) player only.
+                g_loadIdSeen = it->pkt.loadId;
+                char tb[96];
+                _snprintf(tb, sizeof(tb) - 1, "[load] GO id=%u is for player %u - not reloading",
+                          it->pkt.loadId, (unsigned)it->pkt.target);
+                tb[sizeof(tb) - 1] = 0; coopLog(tb);
+                continue;
+            }
             if (closeEditorForLoad()) {
                 s_heldGos.insert(s_heldGos.end(), it, gos.end());
                 s_heldTick = GetTickCount();

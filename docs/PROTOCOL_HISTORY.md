@@ -157,3 +157,8 @@ build** after a bump.
   gender arrows enabled (the mid-game editor locked them, so a new player kept
   the host's race).
 - Test lever `KENSHICOOP_LOOK_TEST` also presses "next race".
+- `LoadGoPacket` gains `target` (65 bytes): when a player joins or returns to a
+  tab that already exists, only they load the host's world - the others keep
+  playing. A brand-new player's character still reloads everyone (its ids only
+  agree after the reload). A join's Resync request is honoured once every
+  10 minutes; the host's own Resync button works any time.
