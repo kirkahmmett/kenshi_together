@@ -983,6 +983,21 @@ function Test-TakeRefused {
     if ($null -eq $gv) { $why += "host never gave" }
     elseif ([int]$gv.Matches[0].Groups[2].Value -ne [int]$gv.Matches[0].Groups[1].Value - 1) { $why += "giving did not go through" }
     if ($null -eq (Select-String -Path $HostFile -Pattern 'REFUSED taking items from another player' -ErrorAction SilentlyContinue | Select-Object -First 1)) { $why += "no refusal logged" }
+    # The worn-item path: a move past the add detours must be put back by the transfer layer.
+    $by = Select-String -Path $HostFile -Pattern 'SCENARIO TAKE bypass hostBefore=(-?\d+) hostAfter=(-?\d+) joinBefore=(-?\d+) joinAfter=(-?\d+) moved=(-?\d+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+    if ($null -eq $by) { $why += "bypass take never tried" }
+    else {
+        $g = $by.Matches[0].Groups
+        if ([int]$g[5].Value -le 0) { $why += "bypass move did not happen (moved=$($g[5].Value))" }
+        elseif ($g[1].Value -ne $g[2].Value -or $g[3].Value -ne $g[4].Value) { $why += "bypass take kept: host $($g[1].Value)->$($g[2].Value), join $($g[3].Value)->$($g[4].Value)" }
+    }
+    $jb = Select-String -Path $JoinFile -Pattern 'SCENARIO TAKE jbypass hostBefore=(-?\d+) hostAfter=(-?\d+) joinBefore=(-?\d+) joinAfter=(-?\d+) moved=(-?\d+)' -ErrorAction SilentlyContinue | Select-Object -Last 1
+    if ($null -eq $jb) { $why += "join bypass take never tried" }
+    else {
+        $g = $jb.Matches[0].Groups
+        if ([int]$g[5].Value -le 0) { $why += "join bypass move did not happen" }
+        elseif ($g[1].Value -ne $g[2].Value -or $g[3].Value -ne $g[4].Value) { $why += "join bypass take kept: host $($g[1].Value)->$($g[2].Value), join $($g[3].Value)->$($g[4].Value)" }
+    }
     $v = if ($why.Count -eq 0) { "PASS" } else { "FAIL" }
     $detail = $why -join "; "
     Write-Host "  TAKE-REFUSED $v $detail"

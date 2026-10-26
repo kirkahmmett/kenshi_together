@@ -2642,7 +2642,9 @@ class TakeRefusedScenario : public TimedScenario {
 public:
     TakeRefusedScenario()
         : TimedScenario("take_refused", 0), type_(0), haveHost_(false), haveJoin_(false),
-          seeded_(false), took_(false), gave_(false), takeMoved_(-2), giveMoved_(-2),
+          seeded_(false), took_(false), gave_(false), bypassed_(false), bypassChecked_(false),
+          takeMoved_(-2), giveMoved_(-2), byMoved_(-2), hBeforeBy_(-1), jBeforeBy_(-1),
+          hAfterBy_(-1), jAfterBy_(-1),
           hBeforeTake_(-1), jBeforeTake_(-1), hAfterTake_(-1), jAfterTake_(-1),
           hBeforeGive_(-1), hAfterGive_(-1) {
         sid_[0] = '\0';
@@ -2673,6 +2675,26 @@ public:
             }
         }
         if (ctx.isHost && haveHost_ && haveJoin_ && sid_[0]) {
+            // The worn-item path (2026-10-26 field test): a move that never reaches
+            // the add detours (suspendVeto=true skips them). The transfer layer
+            // must put it back on its next pass.
+            if (!bypassed_ && ctx.elapsedMs >= BYPASS_MS) {
+                bypassed_ = true;
+                hBeforeBy_ = count(ctx.gw, hostLeader_);
+                jBeforeBy_ = count(ctx.gw, joinLeader_);
+                byMoved_ = engine::moveItemBetweenContainers(ctx.gw, joinLeader_, hostLeader_,
+                                                             sid_, type_, 1, /*suspendVeto*/ true);
+            }
+            if (bypassed_ && !bypassChecked_ && ctx.elapsedMs >= BYPASS_MS + 3000) {
+                bypassChecked_ = true;
+                hAfterBy_ = count(ctx.gw, hostLeader_);
+                jAfterBy_ = count(ctx.gw, joinLeader_);
+                char b[200];
+                _snprintf(b, sizeof(b) - 1,
+                          "SCENARIO TAKE bypass hostBefore=%d hostAfter=%d joinBefore=%d joinAfter=%d moved=%d",
+                          hBeforeBy_, hAfterBy_, jBeforeBy_, jAfterBy_, byMoved_);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
             if (!took_ && ctx.elapsedMs >= TAKE_MS) {
                 took_ = true;
                 hBeforeTake_ = count(ctx.gw, hostLeader_);
@@ -2699,17 +2721,39 @@ public:
                 b[sizeof(b) - 1] = '\0'; coop::logLine(b);
             }
         }
+        // The same worn-item path from the join's side: out of the HOST's leader.
+        if (!ctx.isHost && haveHost_ && haveJoin_ && sid_[0]) {
+            if (!bypassed_ && ctx.elapsedMs >= BYPASS_MS) {
+                bypassed_ = true;
+                hBeforeBy_ = count(ctx.gw, hostLeader_);
+                jBeforeBy_ = count(ctx.gw, joinLeader_);
+                byMoved_ = engine::moveItemBetweenContainers(ctx.gw, hostLeader_, joinLeader_,
+                                                             sid_, type_, 1, /*suspendVeto*/ true);
+            }
+            if (bypassed_ && !bypassChecked_ && ctx.elapsedMs >= BYPASS_MS + 3000) {
+                bypassChecked_ = true;
+                hAfterBy_ = count(ctx.gw, hostLeader_);
+                jAfterBy_ = count(ctx.gw, joinLeader_);
+                char b[200];
+                _snprintf(b, sizeof(b) - 1,
+                          "SCENARIO TAKE jbypass hostBefore=%d hostAfter=%d joinBefore=%d joinAfter=%d moved=%d",
+                          hBeforeBy_, hAfterBy_, jBeforeBy_, jAfterBy_, byMoved_);
+                b[sizeof(b) - 1] = '\0'; coop::logLine(b);
+            }
+        }
         if (ctx.elapsedMs >= DURATION_MS) {
             if (!ctx.isHost) {
-                passed_ = true;
+                passed_ = !bypassChecked_ || (hAfterBy_ == hBeforeBy_ && jAfterBy_ == jBeforeBy_);
             } else {
                 bool blockOk = took_ && jBeforeTake_ > 0 && hAfterTake_ == hBeforeTake_ &&
                                jAfterTake_ == jBeforeTake_;
                 bool giveOk  = gave_ && hBeforeGive_ > 0 && hAfterGive_ == hBeforeGive_ - 1;
-                passed_ = blockOk && giveOk;
+                bool bypassOk = bypassChecked_ && byMoved_ > 0 && jBeforeBy_ > 0 &&
+                                hAfterBy_ == hBeforeBy_ && jAfterBy_ == jBeforeBy_;
+                passed_ = blockOk && giveOk && bypassOk;
                 char b[112];
-                _snprintf(b, sizeof(b) - 1, "SCENARIO TAKE verdict blockOk=%d giveOk=%d",
-                          blockOk ? 1 : 0, giveOk ? 1 : 0);
+                _snprintf(b, sizeof(b) - 1, "SCENARIO TAKE verdict blockOk=%d giveOk=%d bypassOk=%d",
+                          blockOk ? 1 : 0, giveOk ? 1 : 0, bypassOk ? 1 : 0);
                 b[sizeof(b) - 1] = '\0'; coop::logLine(b);
             }
             return true;
@@ -2730,14 +2774,16 @@ private:
     }
 
     static const unsigned long SEED_MS     = 6000;
+    static const unsigned long BYPASS_MS   = 11000;
     static const unsigned long TAKE_MS     = 18000;
     static const unsigned long GIVE_MS     = 24000;
     static const unsigned long DURATION_MS = 32000;
 
     char         sid_[48];
     unsigned int type_;
-    bool         haveHost_, haveJoin_, seeded_, took_, gave_;
-    int          takeMoved_, giveMoved_;
+    bool         haveHost_, haveJoin_, seeded_, took_, gave_, bypassed_, bypassChecked_;
+    int          takeMoved_, giveMoved_, byMoved_;
+    int          hBeforeBy_, jBeforeBy_, hAfterBy_, jAfterBy_;
     int          hBeforeTake_, jBeforeTake_, hAfterTake_, jAfterTake_, hBeforeGive_, hAfterGive_;
     unsigned int hostLeader_[5];
     unsigned int joinLeader_[5];
