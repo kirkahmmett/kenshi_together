@@ -1199,7 +1199,22 @@ void tickLook(GameWorld* gw) {
         _snprintf(b, sizeof(b) - 1, "[look] TEST: next race -> %s (%s)", rs, ok ? "ok" : "FAILED");
         b[sizeof(b) - 1] = '\0'; coopLog(b);
     }
-    if (lookTestS > 0 && g_lookEditing && g_lookSeenOpen && now - g_lookOpenTick > 4000) {
+    // KENSHICOOP_LOOK_CONFIRM=1: leave through the editor's own Confirm button
+    // (then its "are you sure" answer), as a player does; else close it directly.
+    static int lookConfirm = -1;
+    if (lookConfirm < 0) { const char* e = getenv("KENSHICOOP_LOOK_CONFIRM"); lookConfirm = (e && e[0] == '1') ? 1 : 0; }
+    static int lookConfirmStep = 0;
+    if (lookTestS > 0 && lookConfirm && g_lookEditing && g_lookSeenOpen && lookConfirmStep < 2 &&
+        now - g_lookOpenTick > 4000u + 2000u * lookConfirmStep) {
+        bool ok = coop::engine::editorPressConfirm(lookConfirmStep);
+        char b[128];
+        _snprintf(b, sizeof(b) - 1, "[look] TEST: confirm step %d %s (editor open=%d)", lookConfirmStep,
+                  ok ? "pressed" : "FAILED", coop::engine::characterEditorOpen(gw));
+        b[sizeof(b) - 1] = '\0'; coopLog(b);
+        ++lookConfirmStep;
+    }
+    if (lookTestS > 0 && g_lookEditing && g_lookSeenOpen &&
+        now - g_lookOpenTick > (lookConfirm ? 9000u : 4000u)) {
         coopLog("[look] TEST: closing the editor");
         coop::engine::closeCharacterEditor(gw);
     }
@@ -1224,7 +1239,7 @@ void tickLook(GameWorld* gw) {
         if (st == 1) g_lookSeenOpen = true;
         if (st == 1 && !g_lookUnlocked && coop::engine::unlockCharacterEditor()) {
             g_lookUnlocked = true;
-            coopLog("[look] editor ready (appearance only)");
+            coopLog("[look] editor ready (new-game mode: race and gender open)");
         }
         if (st == 0 && g_lookSeenOpen) {
             g_lookEditing = false;

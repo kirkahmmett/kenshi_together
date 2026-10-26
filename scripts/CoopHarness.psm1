@@ -54,6 +54,7 @@ $script:CoopDiagEnvKeys = @(
     # --- combat-drive bands (Config.cpp; Replicator::setCombatTuning) ---
     'KENSHICOOP_COMBAT_CONVERGE_MS'
     'KENSHICOOP_LOOK_TEST'
+    'KENSHICOOP_LOOK_CONFIRM'
     'KENSHICOOP_RESYNC_TEST'
     'KENSHICOOP_TRADE_TEST'
     'KENSHICOOP_TRADER_SYNC'

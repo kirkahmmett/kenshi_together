@@ -163,6 +163,32 @@ static Character* lookChar(const unsigned int hand[5]) {
     return resolveCharByHand(hand[3], hand[4], hand[0], hand[1], hand[2]);
 }
 
+// activateCharacterEditMode builds the window in MID-GAME mode: the barber
+// view, whose race/gender arrows are never wired and whose race list holds the
+// character's own race only. While we open it, the window is built in NEW-GAME
+// mode instead, so race and gender change right in the editor. The lektor is
+// passed by value (16 bytes -> the caller's copy, by address): forwarded as is.
+typedef void (__fastcall* ShowEditorFn)(ForgottenGUI* self, void* chars, int mode, const void* races);
+static ShowEditorFn g_showEditorOrig = 0;
+static bool g_editorNewGame = false;
+static void __fastcall showEditor_hook(ForgottenGUI* self, void* chars, int mode, const void* races) {
+    int asked = mode;
+    if (g_editorNewGame && mode == EDIT_MIDGAME) mode = EDIT_NEWGAME;
+    char b[96];
+    _snprintf(b, sizeof(b) - 1, "[look] editor window mode %d -> %d", asked, mode);
+    b[sizeof(b) - 1] = 0; coop::logLine(b);
+    g_showEditorOrig(self, chars, mode, races);
+}
+static bool installShowEditorHook() {
+    static int state = 0; // 0 untried, 1 on, -1 failed
+    if (state == 0) {
+        intptr_t a = KenshiLib::GetRealAddress(&ForgottenGUI::showCharacterEditor);
+        state = (a && KenshiLib::AddHook(a, (void*)&showEditor_hook, (void**)&g_showEditorOrig)
+                          == KenshiLib::SUCCESS) ? 1 : -1;
+    }
+    return state == 1;
+}
+
 static bool openEditorSeh(GameWorld* gw, Character* c) {
     __try {
         if (!gw->player) return false;
@@ -173,7 +199,11 @@ static bool openEditorSeh(GameWorld* gw, Character* c) {
 bool openCharacterEditor(GameWorld* gw, const unsigned int hand[5]) {
     if (!gw || !hand || !resolveLookFns()) return false;
     Character* c = lookChar(hand);
-    return c ? openEditorSeh(gw, c) : false;
+    if (!c) return false;
+    g_editorNewGame = installShowEditorHook();
+    bool ok = openEditorSeh(gw, c);
+    g_editorNewGame = false;
+    return ok;
 }
 
 int characterEditorOpen(GameWorld* gw) {
@@ -254,6 +284,29 @@ static bool clickNextRaceSeh(CharacterEditWindow* w, const char** before, const 
     *afterCall = "not-called";
     return true;
 }
+// Test lever: the editor's own Confirm (step 0), then the answer to its
+// "are you sure" box (step 1). Returns false when no editor window exists.
+struct EdConfirmTag { typedef void (CharacterEditWindow::*type)(MyGUI::Widget*); friend type edGet(EdConfirmTag); };
+struct EdConfirmCbTag { typedef void (CharacterEditWindow::*type)(int); friend type edGet(EdConfirmCbTag); };
+template struct EdRob<EdConfirmTag, &CharacterEditWindow::confirmButton>;
+template struct EdRob<EdConfirmCbTag, &CharacterEditWindow::confirmMessageCallback>;
+typedef void (__fastcall* EdIntFn)(CharacterEditWindow* self, int v);
+static bool confirmSeh(CharacterEditWindow* w, int step, EdWidgetFn btn, EdIntFn cb) {
+    __try {
+        if (step == 0) btn(w, 0);
+        else cb(w, 0);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+bool editorPressConfirm(int step) {
+    ForgottenGUI* g = ::gui;
+    if (!g || !g->characterEditor) return false;
+    EdWidgetFn btn = (EdWidgetFn)KenshiLib::GetRealAddress(edGet(EdConfirmTag()));
+    EdIntFn cb = (EdIntFn)KenshiLib::GetRealAddress(edGet(EdConfirmCbTag()));
+    if (!btn || !cb) return false;
+    return confirmSeh(g->characterEditor, step, btn, cb);
+}
+
 bool editorClickNextRace(char* raceSid, unsigned int len) {
     if (raceSid && len) raceSid[0] = 0;
     ForgottenGUI* g = ::gui;
@@ -262,8 +315,9 @@ bool editorClickNextRace(char* raceSid, unsigned int len) {
     const char* b0 = ""; const char* b1 = ""; const char* b2 = "";
     if (!clickNextRaceSeh(g->characterEditor, &b0, &b1, &b2)) return false;
     if (raceSid && len) {
-        _snprintf(raceSid, len - 1, "before=%s click=%s call=%s fns=%d%d", b0, b1, b2,
-                  g_edLoadDataFn ? 1 : 0, g_edNextRaceFn ? 1 : 0);
+        bool mid = false;
+        __try { mid = g->characterEditor->isMidGame; } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        _snprintf(raceSid, len - 1, "before=%s click=%s midGame=%d", b0, b1, mid ? 1 : 0);
         raceSid[len - 1] = 0;
     }
     return true;
