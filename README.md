@@ -1,115 +1,104 @@
-# Kenshi Together
+# KENSHI TOGETHER — CO-OP MULTIPLAYER
 
-Co-op multiplayer for **[Kenshi](https://lofigames.com/)**, built as an
-[RE_Kenshi](https://github.com/BFrizzleFoShizzle/RE_Kenshi) /
-[KenshiLib](https://github.com/BFrizzleFoShizzle/KenshiLib) plugin.
+**One world. Separate squads. Shared suffering.**
 
-One player hosts their world; friends join from Kenshi's main menu over Steam and
-each plays their own squad inside it. Characters, NPCs, combat, inventories,
-trades, ground items, buildings, containers, research, one shared money pool and
-game speed are kept in sync, and the host's save is the shared save.
+We're a few friends who wanted to experience the world of
+[Kenshi](https://lofigames.com/) together. So we decided to build the co-op mod we
+wished existed. We figured we probably weren't the only ones, so we decided to share
+it with everyone.
 
-> **Status: beta.** Played and tested regularly with 2-3 players. Expect the odd
-> desync - the in-game **Resync** and **Report** buttons exist for exactly that.
+> **Kenshi Together is currently in BETA and actively being developed.** Expect bugs,
+> regular updates and improvements as we continue playing and building alongside the
+> community.
 
-Kenshi Together is a fork of [KenshiCoop by nhoral](https://github.com/nhoral/KenshiCoop).
-Its files are named `KenshiTogether` so it never collides with other mods built on
-the same base.
+## Features
 
-## Play
+- Explore and survive together in one shared world.
+- Control your own characters and independent squads.
+- Synchronized combat, NPCs, items, trading, buildings and research.
+- Shared economy and persistent world using the host's save.
+- Join through Steam friends. No IPs or port forwarding.
+- In-game **F2** panel for multiplayer controls, pings and troubleshooting.
 
-Every player needs **Kenshi 1.0.65 or 1.0.68 (Steam)** with **Steam running and
-online**. No port forwarding, no IP addresses.
+## Installation
 
-1. **Install** (every player): extract the release zip, close Kenshi and
-   double-click **`KenshiTogether-Setup.cmd`**. It installs
-   [RE_Kenshi](https://www.nexusmods.com/kenshi/mods/847) (the plugin loader) and
-   the `KenshiTogether` mod, and enables it. (`-Uninstall` removes it again.)
-2. **Host:** load a save or start a new game ("Multiplayer Wanderer" is a ready
-   two-squad start), press **F2** and click **Host for friends**.
-3. **Join:** start Kenshi and stay at the main menu. Press **F2** and click
-   **Join &lt;name&gt;'s game**. The host's world is sent over and loads by itself.
+**From the Steam Workshop**
 
-The kit's `README.txt` (and `KURULUM_TR.txt` in Turkish) has the full guide:
-character editing, host settings, Resync/Report, LAN play and troubleshooting.
+1. Subscribe to Kenshi Together on the Workshop.
+2. Install [RE_Kenshi 0.3.1+](https://www.nexusmods.com/kenshi/mods/847) separately
+   (required plugin loader).
+3. Enable Kenshi Together in your Kenshi mod list.
+4. Make sure everyone has the same mod versions and Steam is online.
 
-### Good to know
+**From the zip** ([Releases](https://github.com/kirkahmmett/kenshi_together/releases))
 
-- **Your own squad.** Each player controls their own squad tab, named after their
-  Steam name, and gets the same tab back next session.
-- **New characters.** A joining player can edit their character (race, gender,
-  look) in Kenshi's own editor; one automatic resync shows it to everyone.
-- **Only the host saves, pauses and sets the speed.** Others can request a speed
-  or a pause from the panel.
-- **Trading.** Give items freely; taking from another player's character asks its
-  owner first (the host can allow free taking).
-- **Leaving.** A player who leaves keeps their squad in the world as
-  "&lt;name&gt; (away)". If the host closes the game, everyone else is told and
-  Kenshi restarts to its main menu.
-- **Two co-op starts** come with the mod: "Multiplayer Wanderer" (vanilla
-  Wanderer with two wanderers in separate squads, by
-  [zeroit789](https://github.com/zeroit789)) and "Multiplayer+ Wanderer" (the
-  same with 500,000 cats in the shared wallet and every stat at 50).
+1. Extract the zip, close Kenshi and double-click `KenshiTogether-Setup.cmd`.
+   It installs RE_Kenshi and the mod for you (`-Uninstall` removes them again).
+2. Use either the Workshop item or the zip - not both.
 
-## How it works
+## How to play
 
-- `KenshiTogether.dll` is loaded into the game by RE_Kenshi. It hooks the engine
-  via KenshiLib and drives all game mutation on the main thread.
-- Networking is [ENet](https://github.com/lsalzman/enet) over UDP through a Steam
-  P2P tunnel (or plain UDP for LAN).
-- The host is authoritative for the world; each player is authoritative for their
-  own squad. See `docs/API_REFERENCE.md` and `docs/PROTOCOL_HISTORY.md`.
+- **HOST:** Start a new game → Press **F2** → **Host for friends**.
+- **JOIN:** Stay at the main menu → Press **F2** → **Join** → Select your friend's session.
+- The host's world loads automatically. Each player controls their own squad.
 
-```
-src/plugin/       The plugin (net, sync/replication, engine facade, test scenarios)
-src/netproto/     Shared wire-protocol headers (plain C++03)
-src/netsim/       WAN simulator (delay/jitter/loss proxy) for tests
-src/prototest/    Wire-protocol unit tests
-src/tunneltest/   Steam-tunnel socket-hook tests
-dist/mods/        Packaging source: RE_Kenshi.json + the .mod (co-op starts)
-scripts/          Build, deploy, installer, kit and automated-test tooling
-tools/            MultiplayerStartGen (builds the .mod) and analysis helpers
-docs/             Build guide, engine/API reference, protocol history
-third_party/      ENet patches, VC10 compat shim (deps are fetched, not committed)
-```
+## Beta & feedback
 
-## Building
+Currently tested with up to 3 players. Bugs and desyncs may happen!
 
-The plugin must be compiled with the **Visual C++ 2010 (v100) x64 toolset** (a
-KenshiLib requirement). Toolchain setup is in [docs/BUILD_SETUP.md](docs/BUILD_SETUP.md).
+- **Desync?** F2 → **Resync**. Give reality a gentle shove.
+- **Found a bug?** F2 → **Report**. Send us the evidence and we'll track down the culprit.
+- **Got ideas?** Open an [issue](https://github.com/kirkahmmett/kenshi_together/issues)
+  or drop them in the Workshop discussions. Even the terrible ones. This is Kenshi,
+  after all.
+
+## Credits & transparency
+
+Built upon [KenshiCoop by nhoral](https://github.com/nhoral/KenshiCoop). Huge thanks
+for laying the foundation that made this project possible! Also thanks to
+[BFrizzleFoShizzle](https://github.com/BFrizzleFoShizzle) for RE_Kenshi and KenshiLib,
+[lsalzman/enet](https://github.com/lsalzman/enet) for networking,
+[zeroit789](https://github.com/zeroit789) for the "Multiplayer Wanderer" start, and
+Lo-Fi Games for Kenshi.
+
+**Developed entirely with AI.** We're just gamers and game development enthusiasts
+learning the craft as we go. AI helped us turn an idea into something we could
+actually play, test and share.
+
+We know AI isn't everyone's thing, and that's perfectly fair. Roast us, skip the mod,
+or give it a shot. No hard feelings either way. The technology is here, whether we
+like it or not. We figured we'd have more fun exploring what we can build with it
+than arguing about whether it should exist.
+
+---
+
+## For developers
+
+`KenshiTogether.dll` is an [RE_Kenshi](https://github.com/BFrizzleFoShizzle/RE_Kenshi) /
+[KenshiLib](https://github.com/BFrizzleFoShizzle/KenshiLib) plugin. It hooks the engine
+and drives all game changes on the main thread. Networking is
+[ENet](https://github.com/lsalzman/enet) over a Steam P2P tunnel (or plain UDP for LAN).
+The host is authoritative for the world; each player for their own squad. See
+`docs/API_REFERENCE.md` and `docs/PROTOCOL_HISTORY.md`.
+
+**Building** needs the Visual C++ 2010 (v100) x64 toolset (a KenshiLib requirement);
+setup is in [docs/BUILD_SETUP.md](docs/BUILD_SETUP.md).
 
 ```bash
 cmd //c scripts/build_plugin.cmd Release
 powershell -ExecutionPolicy Bypass -File scripts/make_mod_kit.ps1 -Version 0.66.7
 ```
 
-`make_mod_kit.ps1` builds the release zip (`dist/KenshiTogether-v<version>.zip`)
-and the Steam Workshop content folder (`dist/workshop/KenshiTogether/`).
+This makes the release zip (`dist/KenshiTogether-v<version>.zip`) and the Workshop
+folder (`dist/workshop/KenshiTogether/`). Dependencies are fetched, not committed:
+[KenshiLib_Examples_deps](https://github.com/BFrizzleFoShizzle/KenshiLib_Examples_deps)
+into `third_party/KenshiLib_deps/`, and [ENet](https://github.com/lsalzman/enet) into
+`third_party/enet/enet/` with the patches in `third_party/enet/patches/`.
 
-Dependencies are fetched, not committed:
-
-- KenshiLib + precompiled libs: clone
-  [KenshiLib_Examples_deps](https://github.com/BFrizzleFoShizzle/KenshiLib_Examples_deps)
-  into `third_party/KenshiLib_deps/`
-- ENet: clone [lsalzman/enet](https://github.com/lsalzman/enet) into
-  `third_party/enet/enet/` and apply the patches in `third_party/enet/patches/`
-
-## Development and testing
-
-`scripts/run_test.ps1` launches two local Kenshi installs (host + join), runs a
-named scenario and judges it from both logs; `scripts/regress.ps1` runs the
-scenario suite. See [docs/BUILD_SETUP.md](docs/BUILD_SETUP.md) Parts D-E.
-
-## Credits
-
-- [nhoral](https://github.com/nhoral) - KenshiCoop, the base this fork builds on
-- [BFrizzleFoShizzle](https://github.com/BFrizzleFoShizzle) - RE_Kenshi and KenshiLib
-- [lsalzman/enet](https://github.com/lsalzman/enet) - UDP networking library
-- [zeroit789](https://github.com/zeroit789) - the "Multiplayer Wanderer" start
-- Lo-Fi Games - Kenshi
+**Testing:** `scripts/run_test.ps1` runs two local Kenshi installs (host + join) through
+a named scenario and judges both logs; `scripts/regress.ps1` runs the suite.
 
 ## License
 
 [AGPL-3.0](LICENSE). KenshiLib and RE_Kenshi are GPLv3; this plugin links KenshiLib
-under GPLv3 section 13 (GPL/AGPL combination). Not affiliated with Lo-Fi Games.
-Non-commercial fan project.
+under GPLv3 section 13. Not affiliated with Lo-Fi Games. Non-commercial fan project.
