@@ -835,6 +835,7 @@ bool unlockCharacterEditor();
 bool editorClickNextRace(char* raceSid, unsigned int len);
 bool editorPressConfirm(int step);
 bool closeGameWindow(); // WM_CLOSE to this process's game window (the host left)
+bool scheduleRestart(); // start this executable again once this process has ended
 bool cameraFocusOnHand(GameWorld* gw, const unsigned int hand[5]); // test lever: look at a character // test lever: 0 = Confirm button, 1 = its "yes"
 
 bool exportCharacterLook(const unsigned int hand[5], const std::string& path,

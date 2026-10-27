@@ -1348,8 +1348,11 @@ void tickLook(GameWorld* gw) {
         if (g_peerPresent) {
             coopLog("[leave] the host is back - staying in the world");
         } else {
+            bool again = coop::engine::scheduleRestart();
             bool ok = coop::engine::closeGameWindow();
-            coopLog(ok ? "[leave] closing the game window" : "[leave] could NOT find the game window");
+            coopLog(!ok ? "[leave] could NOT find the game window"
+                        : again ? "[leave] closing the game - it restarts to the main menu"
+                                : "[leave] closing the game (restart helper FAILED to start)");
         }
     }
     if (g_focusMineTick != 0 && now - g_focusMineTick > 1000) {
@@ -2091,8 +2094,8 @@ void processNetEvents(GameWorld* gw) {
         // follow and nothing to save into, so the join leaves it (2026-10-27).
         if (hostGone && g_gameStarted && g_hostGoneTick == 0) {
             g_hostGoneTick = GetTickCount();
-            uiNotice("The host left the game - the session is over, Kenshi closes in 5 seconds");
-            coopLog("[leave] the host is gone - closing the game in 5 s");
+            uiNotice("The host left the game - back to the main menu in 5 seconds (Kenshi restarts)");
+            coopLog("[leave] the host is gone - restarting to the main menu in 5 s");
             coop::engine::writeGameSpeed(gw, 1.0f, true); // pause: nothing happens to the squad meanwhile
         }
     }

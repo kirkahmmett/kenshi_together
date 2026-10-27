@@ -238,6 +238,69 @@ bool closeGameWindow() {
     return found;
 }
 
+// Kenshi has no way back to its title screen: its in-game menu only offers
+// New/Save/Load/Options/Exit (data/gui/layout/Kenshi_MainMenuPopupPanel.layout),
+// and the title screen exists only at startup. So "back to the main menu" is a
+// restart: a hidden helper waits for this process to end, then starts the same
+// executable again - the player sees Kenshi's usual launcher, then the menu.
+static void psQuote(std::wstring& out, const wchar_t* s) {
+    out += L'\'';
+    for (; *s; ++s) { if (*s == L'\'') out += L'\''; out += *s; }
+    out += L'\'';
+}
+bool scheduleRestart() {
+    wchar_t exe[MAX_PATH];
+    DWORD n = GetModuleFileNameW(NULL, exe, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return false;
+    std::wstring dir(exe);
+    size_t slash = dir.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) dir.resize(slash);
+    // RE_Kenshi runs the game from <Kenshi>\RE_Kenshi; started directly that
+    // copy only shows a "Problem" box (measured). Start the Kenshi folder's own
+    // executable instead, as the player does.
+    size_t up = dir.find_last_of(L"\\/");
+    if (up != std::wstring::npos && _wcsicmp(dir.c_str() + up + 1, L"RE_Kenshi") == 0) {
+        dir.resize(up);
+        std::wstring root = dir + L"\\kenshi_x64.exe";
+        if (GetFileAttributesW(root.c_str()) != INVALID_FILE_ATTRIBUTES && root.size() < MAX_PATH)
+            wcscpy(exe, root.c_str());
+    }
+    wchar_t pid[16];
+    _snwprintf(pid, 15, L"%lu", GetCurrentProcessId());
+    pid[15] = 0;
+    std::wstring cmd = L"powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \"Wait-Process -Id ";
+    cmd += pid;
+    cmd += L" -ErrorAction SilentlyContinue; Start-Process -FilePath ";
+    psQuote(cmd, exe);
+    cmd += L" -WorkingDirectory ";
+    psQuote(cmd, dir.c_str());
+    cmd += L"\"";
+    std::vector<wchar_t> buf(cmd.begin(), cmd.end());
+    buf.push_back(0);
+    STARTUPINFOW si;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi;
+    // Kenshi may run inside a job that kills its children when it exits: leave
+    // it if allowed, else start inside it (and say so).
+    DWORD flags = CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB;
+    BOOL ok = CreateProcessW(NULL, &buf[0], NULL, NULL, FALSE, flags, NULL, dir.c_str(), &si, &pi);
+    DWORD err = ok ? 0 : GetLastError();
+    if (!ok) {
+        flags = CREATE_NO_WINDOW;
+        ok = CreateProcessW(NULL, &buf[0], NULL, NULL, FALSE, flags, NULL, dir.c_str(), &si, &pi);
+    }
+    char b[400];
+    _snprintf(b, sizeof(b) - 1, "[leave] restart helper %s (breakaway=%d err=%lu) exe='%ls'",
+              ok ? "started" : "FAILED", (flags & CREATE_BREAKAWAY_FROM_JOB) ? 1 : 0, err, exe);
+    b[sizeof(b) - 1] = 0;
+    coop::logLine(b);
+    if (!ok) return false;
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return true;
+}
+
 int characterEditorOpen(GameWorld* gw) {
     if (!gw) return -1;
     __try {
