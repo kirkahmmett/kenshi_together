@@ -1,10 +1,10 @@
 <?xml version="1.0"?>
 <ModData xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <id>0</id>
+  <id>3828387369</id>
   <mod>KenshiTogether</mod>
   <title>[BETA] Kenshi Together - Co-op Multiplayer</title>
   <tags>
     <string>Gameplay</string>
   </tags>
-  <visibility>2</visibility>
+  <visibility>1</visibility>
 </ModData>
