@@ -11,6 +11,9 @@
 
 namespace coop {
 
+// A file next to our DLL (the mod folder, or a Steam Workshop content folder).
+std::string modFilePath(const char* name);
+
 struct Config {
     bool          isHost;          // KENSHICOOP_MODE != "join"
     std::string   ip;              // KENSHICOOP_IP   (join target)

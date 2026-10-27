@@ -1,0 +1,105 @@
+Steam Workshop page - Kenshi Together
+=====================================
+Paste each block into the matching Workshop field. The description uses Steam's
+BBCode ([h1], [b], [list], [url=...]); it renders on the Workshop page as-is.
+
+
+UPLOAD CHECKLIST
+----------------
+1. Build the release: scripts\make_mod_kit.ps1 -Version <x.y.z>. Upload the
+   CONTENT of dist\workshop\KenshiTogether\ (dll, .mod, RE_Kenshi.json,
+   coop_config.json, version.txt) and dist\workshop\preview.png as the picture.
+2. Upload it PRIVATE first. Subscribe on a test account/PC with no zip install,
+   enable KenshiTogether in the Mods menu, and check: RE_Kenshi_log.txt shows
+   "KenshiTogether:", F2 opens the panel, the version check reads the release
+   version (not "dev").
+3. Make the source code public first (AGPL-3.0) and put its link into the
+   description below (SOURCE_LINK_HERE).
+4. Only then switch the item to Public.
+5. Every update: same version on Workshop and the GitHub zip.
+
+TITLE
+-----
+[BETA] Kenshi Together - Co-op Multiplayer
+
+
+SHORT SUMMARY (first line people see / for the store tagline)
+-------------
+Play Kenshi with your friends: one shared world, one squad tab per player, joined over Steam with no port forwarding.
+
+
+DESCRIPTION
+-----------
+[h1]Kenshi Together - co-op for Kenshi[/h1]
+
+Play Kenshi with your friends in [b]one shared world[/b]. Every player gets their own squad tab, named after their Steam name. You walk, fight, trade, build and get beaten up together, and you see the same thing on every screen.
+
+One person hosts their save, friends click "Join" from the main menu, and the host's world is sent to them and loads by itself. No port forwarding, no IP addresses, no copying save files around.
+
+[b]This is a beta.[/b] It is played and tested every week, but Kenshi was never made for multiplayer: expect the odd desync. The in-game [b]Resync[/b] and [b]Report[/b] buttons are there for exactly that (see below).
+
+[h1]Features[/h1]
+[list]
+[*][b]Join from the main menu[/b] - press F2, pick a Steam friend who is hosting, click Join. The world downloads and loads on its own.
+[*][b]Your own squad[/b] - every player controls their own squad tab, named after their Steam name, and gets the same tab back next session.
+[*][b]Make your own character[/b] - joining players open Kenshi's own character editor (race, gender, face, name). Everyone sees the result.
+[*][b]Synced world[/b] - characters, NPCs, combat, damage and limb loss, medic work, carrying bodies, shackles and jail, doors, containers, ground items, buildings you place, research, mining and house deeds.
+[*][b]One shared purse[/b] - the save holds one wallet, so everyone spends the same money. Gear keeps its grade when it changes hands.
+[*][b]Safe trading between players[/b] - give items to a friend freely; taking from another player's character needs their OK (a request pops up on their side). The host can switch this off.
+[*][b]Host-controlled time[/b] - only the host pauses and sets the game speed. Other players can [i]request[/i] a speed or a pause and the host accepts it with one click. Trade and dialogue windows no longer freeze the game for everyone.
+[*][b]Pings[/b] - mark a spot on the ground and everyone sees it.
+[*][b]Drop in, drop out[/b] - a player who leaves keeps their squad in the world as "<name> (away)": it stands still and takes no melee damage until they come back. When someone joins, only that player loads; everyone else keeps playing. If the host closes the game, everyone else gets a message and Kenshi restarts to its main menu.
+[*][b]Ready-for-everyone loading[/b] - the host's game waits until every player has finished loading, so nobody arrives into a fight already started.
+[*][b]Version and mod check[/b] - a player with a different build or a different mod list gets a clear message instead of a broken session.
+[*][b]Multiplayer start[/b] - "Multiplayer Wanderer" in the New Game list is a ready two-squad start.
+[/list]
+
+[h1]Requirements[/h1]
+[list]
+[*][b]RE_Kenshi 0.3.1 or newer[/b] - the plugin loader this mod needs. It is not on the Workshop: [url=https://www.nexusmods.com/kenshi/mods/847]RE_Kenshi on Nexus[/url]. Its installer also sets up the Kenshi 1.0.65 executable it runs on.
+[*][b]Steam running and online[/b] for every player.
+[*][b]Prefer a zip?[/b] The GitHub release has a one-click installer (KenshiTogether-Setup.cmd) that also installs RE_Kenshi. Use either the Workshop item or the zip, not both.
+[*][b]Everyone on the same Kenshi Together version[/b] and the [b]same enabled mods[/b]. The game tells you if something does not match.
+[/list]
+
+[h1]How to play[/h1]
+[b]Host[/b]
+[olist]
+[*]Load your save, or start a new game ("Multiplayer Wanderer" works well).
+[*]Press [b]F2[/b] and click [b]Host for friends[/b]. Your game is now open to your Steam friends.
+[*]Optional: [b]Invite a Steam friend[/b] sends them a Steam invite.
+[/olist]
+
+[b]Friends[/b]
+[olist]
+[*]Start Kenshi and stay at the [b]main menu[/b] - you do not need the save.
+[*]Press [b]F2[/b]. Under "Join a friend", click [b]Join <name>'s game[/b].
+[*]The host's world loads by itself. New players get a character of their own and can edit it.
+[/olist]
+
+Only the host saves - the host's save is the shared save.
+
+[h1]Good to know[/h1]
+[list]
+[*][b]F2[/b] opens the co-op panel at any time: connection status, invite, pause, speed requests, ping, leave.
+[*][b]Something out of sync?[/b] Press [b]Resync[/b] in the F2 panel: everyone reloads the host's world. (The host's button works any time; players can ask once every 10 minutes.)
+[*][b]Found a bug?[/b] Press [b]Report[/b] in the F2 panel right away. It puts a folder with your logs on your Desktop - attach it to your comment or bug report together with what you were doing.
+[*][b]Host settings[/b] (F2 > Host settings) decide what other players may do: build, use containers, buy, take from each other.
+[*]Running two copies of Kenshi on one PC needs a lot of memory (4-5 GB each). Close browsers and other big apps first.
+[*]LAN / direct IP play is under F2 > [b]Advanced (IP / Steam ID)[/b].
+[*]Logs: Kenshi\KenshiTogether_host.log (host) and KenshiTogether_join.log (players).
+[*]Do not enable another co-op mod (such as KenshiCoop) at the same time.
+[/list]
+
+[h1]Known issues[/h1]
+[list]
+[*]Tested mostly with 2-3 players; 4+ players is not validated yet.
+[*]Merchant stock is not shared yet: two players may see a slightly different shop.
+[*]Mods that add new mechanics (not just items or races) may desync. Item, armour and race mods are usually fine if everyone has them.
+[/list]
+
+[h1]Credits[/h1]
+Built on [url=https://github.com/nhoral/KenshiCoop]KenshiCoop by nhoral[/url] (AGPL-3.0), and on [url=https://github.com/BFrizzleFoShizzle/RE_Kenshi]RE_Kenshi[/url] and KenshiLib.
+Source code: [url=SOURCE_LINK_HERE]GitHub[/url]
+
+Have fun, and please report what breaks - every report makes the next version better.

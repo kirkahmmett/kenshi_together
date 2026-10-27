@@ -1,4 +1,4 @@
-// MultiplayerStartGen - generates dist/mods/KenshiCoop/KenshiCoop.mod, the FCS data
+// MultiplayerStartGen - generates dist/mods/KenshiTogether/KenshiTogether.mod, the FCS data
 // half of the KenshiCoop mod. It carries TWO co-op game starts:
 //
 //   "Multiplayer (Wanderer x2)"   vanilla Wanderer start, two wanderers, one squad each.
@@ -39,7 +39,7 @@ using OpenConstructionSet.Mods;
 
 // ---- Identity constants -----------------------------------------------------
 // The file we ship. Deliberately NOT the record namespace below.
-const string OutModName = "KenshiCoop";
+const string OutModName = "KenshiTogether";
 // The record namespace, frozen at the name the records were first published under.
 const string RecordNamespace = "KenshiCoop-MultiplayerStart";
 
@@ -183,18 +183,18 @@ Item[] items = [wanderer2, wandererSquad2, wandererStart, plusWanderer, plusSqua
 
 // ---- 4) Assemble and write ---------------------------------------------------
 var header = new Header(1, "",
-    "The data half of KenshiCoop: two co-op game starts. \"Multiplayer (Wanderer x2)\" is the " +
+    "The data half of Kenshi Together: two co-op game starts. \"Multiplayer (Wanderer x2)\" is the " +
     "vanilla Wanderer start with two wanderers, each already in their own squad, so the host plays " +
     "squad 1 and the joining player takes squad 2. \"Multiplayer+ (Wanderer x2)\" is the same start " +
     "with 500,000 cats in the shared wallet and both characters levelled to 50 in every stat by the " +
-    "plugin. Data-only mod; requires the KenshiCoop plugin for co-op.")
+    "plugin. Data-only mod; requires the Kenshi Together plugin for co-op.")
 {
     Dependencies = ["gamedata.base", "Newwworld.mod", "rebirth.mod", "Dialogue.mod"],
 };
 var info = new ModInfoData
 {
     ModName = OutModName + ".mod",
-    Title = "KenshiCoop",
+    Title = "Kenshi Together",
     Tags = ["Gameplay"],
 };
 var modData = new ModFileData(DataFileType.Mod, header, items.Length, items, info);
@@ -302,10 +302,10 @@ return 0;
 static string FindRepoRoot()
 {
     for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        if (Directory.Exists(Path.Combine(dir.FullName, "dist", "mods", "KenshiCoop")))
+        if (Directory.Exists(Path.Combine(dir.FullName, "dist", "mods", "KenshiTogether")))
             return dir.FullName;
     throw new DirectoryNotFoundException(
-        $"could not find the repo root (no dist/mods/KenshiCoop above {AppContext.BaseDirectory})");
+        $"could not find the repo root (no dist/mods/KenshiTogether above {AppContext.BaseDirectory})");
 }
 
 // The install holding gamedata.base. Same default the scripts/ drivers use.

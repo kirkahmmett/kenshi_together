@@ -19,10 +19,10 @@ REM   Usage:  scripts\deploy.cmd ["C:\path\to\Kenshi"] [Harness|Release|Debug]
 set "CONFIG=%~2"
 if "%CONFIG%"=="" set "CONFIG=Harness"
 
-set "DLL=%REPO%\src\plugin\x64\%CONFIG%\KenshiCoop.dll"
-set "JSON=%REPO%\dist\mods\KenshiCoop\RE_Kenshi.json"
-set "MOD=%REPO%\dist\mods\KenshiCoop\KenshiCoop.mod"
-set "DST=%KENSHI%\mods\KenshiCoop"
+set "DLL=%REPO%\src\plugin\x64\%CONFIG%\KenshiTogether.dll"
+set "JSON=%REPO%\dist\mods\KenshiTogether\RE_Kenshi.json"
+set "MOD=%REPO%\dist\mods\KenshiTogether\KenshiTogether.mod"
+set "DST=%KENSHI%\mods\KenshiTogether"
 
 if not exist "%DLL%" (
     echo ERROR: %DLL% not found. Build first: scripts\build_plugin.cmd
@@ -35,14 +35,14 @@ if not exist "%KENSHI%\kenshi_x64.exe" (
 
 if not exist "%DST%" mkdir "%DST%"
 
-copy /Y "%DLL%"  "%DST%\KenshiCoop.dll"   >nul
+copy /Y "%DLL%"  "%DST%\KenshiTogether.dll"   >nul
 if errorlevel 1 (
-    echo ERROR: could not copy KenshiCoop.dll to "%DST%".
+    echo ERROR: could not copy KenshiTogether.dll to "%DST%".
     echo        The file is locked - a Kenshi instance is probably still running.
     echo        Close all Kenshi processes and retry.
     exit /b 1
 )
-echo Copied KenshiCoop.dll
+echo Copied KenshiTogether.dll
 copy /Y "%JSON%" "%DST%\RE_Kenshi.json"   >nul
 if errorlevel 1 (
     echo ERROR: could not copy RE_Kenshi.json to "%DST%" ^(locked?^).
@@ -50,7 +50,7 @@ if errorlevel 1 (
 )
 echo Copied RE_Kenshi.json
 
-REM KenshiCoop.mod is a real FCS data mod now: it carries the "Multiplayer
+REM KenshiTogether.mod is a real FCS data mod now: it carries the "Multiplayer
 REM (Wanderer x2)" and "Multiplayer+ (Wanderer x2)" co-op starts (regenerate with
 REM tools\MultiplayerStartGen). The repo owns it, so always overwrite the
 REM install's copy with the repo's (a stale placeholder would hide the starts).
@@ -58,12 +58,12 @@ if not exist "%MOD%" (
     echo ERROR: %MOD% not found in the repo.
     exit /b 1
 )
-copy /Y "%MOD%" "%DST%\KenshiCoop.mod"   >nul
+copy /Y "%MOD%" "%DST%\KenshiTogether.mod"   >nul
 if errorlevel 1 (
-    echo ERROR: could not copy KenshiCoop.mod to "%DST%" ^(locked?^).
+    echo ERROR: could not copy KenshiTogether.mod to "%DST%" ^(locked?^).
     exit /b 1
 )
-echo Copied KenshiCoop.mod
+echo Copied KenshiTogether.mod
 
 echo.
 echo Deployed to: %DST%
@@ -73,20 +73,20 @@ REM Also deploy into the separate JOIN install if it exists, so both clients run
 REM the same freshly-built plugin. (Created by scripts\setup_join_install.cmd.)
 set "JOINDIR=%USERPROFILE%\Kenshi-Join"
 if not "%KENSHI%"=="%JOINDIR%" if exist "%JOINDIR%\kenshi_x64.exe" (
-    set "JDST=%JOINDIR%\mods\KenshiCoop"
+    set "JDST=%JOINDIR%\mods\KenshiTogether"
     if not exist "!JDST!" mkdir "!JDST!"
-    copy /Y "%DLL%"  "!JDST!\KenshiCoop.dll" >nul
+    copy /Y "%DLL%"  "!JDST!\KenshiTogether.dll" >nul
     if errorlevel 1 (
-        echo ERROR: could not copy KenshiCoop.dll to join install "!JDST!".
+        echo ERROR: could not copy KenshiTogether.dll to join install "!JDST!".
         echo        The file is locked - a Kenshi-Join instance is probably still running.
         exit /b 1
     )
-    echo Copied KenshiCoop.dll  -^> join install
+    echo Copied KenshiTogether.dll  -^> join install
     copy /Y "%JSON%" "!JDST!\RE_Kenshi.json" >nul && echo Copied RE_Kenshi.json  -^> join install
-    copy /Y "%MOD%"  "!JDST!\KenshiCoop.mod" >nul && echo Copied KenshiCoop.mod   -^> join install
+    copy /Y "%MOD%"  "!JDST!\KenshiTogether.mod" >nul && echo Copied KenshiTogether.mod   -^> join install
 )
 
 echo.
-echo Next: launch Kenshi, enable "KenshiCoop" in the Mods tab, then check
+echo Next: launch Kenshi, enable "KenshiTogether" in the Mods tab, then check
 echo RE_Kenshi_log.txt for "KenshiCoop loaded!".
 endlocal

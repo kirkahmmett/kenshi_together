@@ -132,8 +132,8 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) { throw "local deploy failed" }
 }
 Write-Host "=== push DLL to $($cfg.host) (protocol lockstep) ==="
-$dll = Join-Path $repoRoot "src\plugin\x64\Harness\KenshiCoop.dll"
-$modDirFwd = "$($cfg.kenshiDir -replace '\\', '/')/mods/KenshiCoop"
+$dll = Join-Path $repoRoot "src\plugin\x64\Harness\KenshiTogether.dll"
+$modDirFwd = "$($cfg.kenshiDir -replace '\\', '/')/mods/KenshiTogether"
 & scp -o BatchMode=yes $dll "${target}:$modDirFwd/"
 if ($LASTEXITCODE -ne 0) { throw "DLL push failed (is Kenshi running on $($cfg.host)?)" }
 

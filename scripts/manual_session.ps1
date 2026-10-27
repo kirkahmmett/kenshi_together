@@ -286,7 +286,7 @@ if (-not $SkipDeploy) {
     & cmd /c "`"$scriptDir\deploy.cmd`""
     if ($LASTEXITCODE -ne 0) { throw "deploy.cmd failed ($LASTEXITCODE)" }
     # Surface exactly which DLL is now deployed so we never validate a stale build.
-    $deployed = Join-Path $HostDir "mods\KenshiCoop\KenshiCoop.dll"
+    $deployed = Join-Path $HostDir "mods\KenshiTogether\KenshiTogether.dll"
     if (Test-Path $deployed) {
         $info = Get-Item $deployed
         Write-Host ("  deployed DLL: {0}  ({1:yyyy-MM-dd HH:mm:ss}, {2} bytes)" -f $deployed, $info.LastWriteTime, $info.Length)
@@ -384,7 +384,7 @@ function Set-CoopEnv {
     $env:KENSHICOOP_TASK_SPIKE   = if ($JailProbe) { "1" } else { "" }
     $env:KENSHICOOP_JAIL_OBSERVE = if ($JailObserve) { "1" } else { "" }
     # Per-mode log next to the install so host/join don't clobber each other.
-    $env:KENSHICOOP_LOG          = if ($Mode -eq "join") { "KenshiCoop_join.log" } else { "KenshiCoop_host.log" }
+    $env:KENSHICOOP_LOG          = if ($Mode -eq "join") { "KenshiTogether_join.log" } else { "KenshiTogether_host.log" }
 }
 
 function Start-PastLauncher {
@@ -477,8 +477,8 @@ if ($hostPid -ne 0) {
     $stamp      = Get-Date -Format "yyyyMMdd_HHmmss"
     $prefix     = if ($JailProbe) { "jail_" } else { "" }
     $dest       = Join-Path $repoRoot ("tools\manual-sessions\{0}{1}_{2}" -f $prefix, $Save.Replace(' ', '_'), $stamp)
-    $hostLogSrc = Join-Path $HostDir "KenshiCoop_host.log"
-    $joinLogSrc = Join-Path $JoinDir "KenshiCoop_join.log"
+    $hostLogSrc = Join-Path $HostDir "KenshiTogether_host.log"
+    $joinLogSrc = Join-Path $JoinDir "KenshiTogether_join.log"
     $hostEngSrc = Join-Path $HostDir "kenshi_info.log"
     $joinEngSrc = Join-Path $JoinDir "kenshi_info.log"
     $pidCsv     = if ($joinPid -ne 0) { "$hostPid,$joinPid" } else { "$hostPid" }
@@ -487,8 +487,8 @@ if ($hostPid -ne 0) {
 `$ErrorActionPreference = 'SilentlyContinue'
 Wait-Process -Id $pidCsv
 New-Item -ItemType Directory -Force -Path '$dest' | Out-Null
-Copy-Item '$hostLogSrc' (Join-Path '$dest' 'KenshiCoop_host.log')
-Copy-Item '$joinLogSrc' (Join-Path '$dest' 'KenshiCoop_join.log')
+Copy-Item '$hostLogSrc' (Join-Path '$dest' 'KenshiTogether_host.log')
+Copy-Item '$joinLogSrc' (Join-Path '$dest' 'KenshiTogether_join.log')
 Copy-Item '$hostEngSrc' (Join-Path '$dest' 'host_engine.log')
 Copy-Item '$joinEngSrc' (Join-Path '$dest' 'join_engine.log')
 "@ | Set-Content -Path $waiterPs -Encoding UTF8
@@ -514,7 +514,7 @@ Copy-Item '$joinEngSrc' (Join-Path '$dest' 'join_engine.log')
 # and any validation would be meaningless. Surface it loudly instead of silently
 # validating the wrong build.
 if (($Inhabit -or $JoinFromMenu) -and -not $TitleScreen) {
-    $hostLog = Join-Path $HostDir "KenshiCoop_host.log"
+    $hostLog = Join-Path $HostDir "KenshiTogether_host.log"
     Write-Host ""
     Write-Host "Confirming the deployed build is the inhabit build (watching host log) ..."
     $deadline = (Get-Date).AddSeconds($StartTimeoutSec)

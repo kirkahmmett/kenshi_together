@@ -274,7 +274,7 @@ bool          g_autoHost = false;
 bool          g_autoHostDone = false; // already hosted (or tried) for this load
 bool          g_prefsLoaded = false;
 bool          g_firstWorldLoaded = true; // set at the first gameplay start
-const char*   PREFS_FILE = "KenshiCoop_prefs.txt";
+const char*   PREFS_FILE = "KenshiTogether_prefs.txt";
 // New game settings (lobby panel): what a NEW game starts with. Index 0 keeps
 // whatever the chosen start gives (e.g. Multiplayer+ = 500,000 cats, stats 50).
 // Applied once, at the first gameplay start of a game that was NOT loaded from a
@@ -364,8 +364,8 @@ DWORD         g_lookOpenTick = 0;
 unsigned int  g_lookHand[5]  = { 0, 0, 0, 0, 0 };
 DWORD         g_lastWorldResetTick = 0;
 DWORD         g_lookAwaitReload = 0;      // != 0: closed for a reload at this tick; reopen only after it
-const char*   LOOK_OUT_FILE  = "KenshiCoop_look_out.tmp";
-const char*   LOOK_IN_FILE   = "KenshiCoop_look_in.tmp";
+const char*   LOOK_OUT_FILE  = "KenshiTogether_look_out.tmp";
+const char*   LOOK_IN_FILE   = "KenshiTogether_look_in.tmp";
 
 void sendLookOffer(coop::u32 playerId) {
     coop::CharLookHeader h;
@@ -520,12 +520,12 @@ void tickReady() {
     g_repl.setSpeedHold(hold);
 }
 
-// Kit version ("0.65.0"): mods\KenshiCoop\version.txt, written by make_mod_kit.
+// Kit version ("0.65.0"): version.txt next to the DLL, written by make_mod_kit.
 // A dev deploy has none - "dev".
 std::string kitVersion() {
     static std::string v;
     if (!v.empty()) return v;
-    FILE* f = fopen("mods\\KenshiCoop\\version.txt", "r");
+    FILE* f = fopen(coop::modFilePath("version.txt").c_str(), "r");
     char line[32];
     line[0] = '\0';
     if (f) { if (!fgets(line, sizeof(line), f)) line[0] = '\0'; fclose(f); }
@@ -1541,8 +1541,8 @@ void onReportRequest() {
     leaf[sizeof(leaf) - 1] = '\0';
     std::string dir = std::string(desk) + "\\" + leaf;
     if (!CreateDirectoryA(dir.c_str(), 0)) { coopErr("[report] could not create the folder"); return; }
-    const char* files[] = { "KenshiCoop_host.log", "KenshiCoop_join.log", "kenshi.log",
-                            "RE_Kenshi_log.txt", "KenshiCoop_prefs.txt", "data\\mods.cfg" };
+    const char* files[] = { "KenshiTogether_host.log", "KenshiTogether_join.log", "kenshi.log",
+                            "RE_Kenshi_log.txt", "KenshiTogether_prefs.txt", "data\\mods.cfg" };
     unsigned int copied = 0;
     // The log this session is writing first (a custom KENSHICOOP_LOG path is not
     // one of the default names), then the usual files beside the game.
@@ -2092,7 +2092,9 @@ void processNetEvents(GameWorld* gw) {
         }
         // The host closed the game (or dropped): the world here has nobody to
         // follow and nothing to save into, so the join leaves it (2026-10-27).
-        if (hostGone && g_gameStarted && g_hostGoneTick == 0) {
+        // Not in a timed test run: there the host always exits first, and the
+        // join's own exit is what the harness waits for.
+        if (hostGone && g_gameStarted && g_hostGoneTick == 0 && g_cfg.testSeconds == 0) {
             g_hostGoneTick = GetTickCount();
             uiNotice("The host left the game - back to the main menu in 5 seconds (Kenshi restarts)");
             coopLog("[leave] the host is gone - restarting to the main menu in 5 s");

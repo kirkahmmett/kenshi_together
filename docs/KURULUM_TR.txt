@@ -18,7 +18,7 @@ KURULUM (her oyuncu)
   1. Zip'e sağ tıkla > Özellikler > "Engellemeyi kaldır" kutusu varsa işaretle >
      Tamam. Sonra zip'i bir klasöre çıkar.
   2. Kenshi KAPALI olsun.
-  3. "KenshiCoop-Setup.cmd" dosyasına çift tıkla.
+  3. "KenshiTogether-Setup.cmd" dosyasına çift tıkla.
      - "Bilgisayarınız korundu" çıkarsa: "Ek bilgi" > "Yine de çalıştır".
      - Yönetici izni sorarsa "Evet".
      - Yeşil "[ok]" satırları görmelisin; kırmızı hata çıkarsa fotoğrafını gönder.
@@ -26,7 +26,7 @@ KURULUM (her oyuncu)
      "RE_Kenshi 0.3.5" yazısını görüyorsan kurulum tamam.
 
   Kenshi Steam kütüphanesinde değilse komut isteminde:
-     KenshiCoop-Setup.cmd -KenshiDir "D:\Oyunlar\Kenshi"
+     KenshiTogether-Setup.cmd -KenshiDir "D:\Oyunlar\Kenshi"
 
 
 OYNAMA
@@ -63,7 +63,7 @@ OYNAMA
     altındaki "Advanced (IP / Steam ID)" içindedir.
   * Host, panelden join'in inşaat / depo / satın alma izinlerini açıp kapatabilir.
   * Kayıtların üzerine yazılmadan önce son 3 kopya yedeklenir:
-       %LOCALAPPDATA%\kenshi\KenshiCoop_backups\
+       %LOCALAPPDATA%\kenshi\KenshiTogether_backups\
 
 
 BU SÜRÜMDE DENEMENİ İSTEDİKLERİM
@@ -83,12 +83,12 @@ SORUN ÇIKARSA
 -------------
   Kenshi klasöründen (genelde C:\Program Files (x86)\Steam\steamapps\common\Kenshi)
   şu dosyaları gönder - Kenshi'yi YENİDEN AÇMADAN önce kopyala, açılınca silinir:
-     KenshiCoop_host.log  veya  KenshiCoop_join.log
+     KenshiTogether_host.log  veya  KenshiTogether_join.log
      RE_Kenshi_log.txt
 
 
 KALDIRMA
 --------
   Zip'i çıkardığın klasörde komut isteminde:
-     KenshiCoop-Setup.cmd -Uninstall                   (sadece mod)
-     KenshiCoop-Setup.cmd -Uninstall -RemoveReKenshi   (RE_Kenshi de)
+     KenshiTogether-Setup.cmd -Uninstall                   (sadece mod)
+     KenshiTogether-Setup.cmd -Uninstall -RemoveReKenshi   (RE_Kenshi de)

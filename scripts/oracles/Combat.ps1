@@ -1153,7 +1153,7 @@ function Test-CombatWin {
 #      FAILs.
 # Log-judged against a MANUAL fight session; invoke as:
 #   . scripts\oracles\Combat.ps1
-#   Test-DeathParity -HostFile <Kenshi>\KenshiCoop_host.log -JoinFile <Kenshi-Join>\KenshiCoop_join.log
+#   Test-DeathParity -HostFile <Kenshi>\KenshiTogether_host.log -JoinFile <Kenshi-Join>\KenshiTogether_join.log
 function Test-DeathParity {
     param([string]$HostFile, [string]$JoinFile)
     if (-not (Test-Path $HostFile) -or -not (Test-Path $JoinFile)) {

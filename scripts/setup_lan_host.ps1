@@ -89,17 +89,17 @@ if ($LASTEXITCODE -ne 0) { throw "scp of runner scripts failed" }
 Write-Host "  runner scripts: pushed -> $($cfg.dropDir)"
 
 # ---- 3. Mod deploy --------------------------------------------------------------------
-$dll  = Join-Path $repoRoot "src\plugin\x64\Harness\KenshiCoop.dll"
-$json = Join-Path $repoRoot "dist\mods\KenshiCoop\RE_Kenshi.json"
-$mod  = "C:\Program Files (x86)\Steam\steamapps\common\Kenshi\mods\KenshiCoop\KenshiCoop.mod"
+$dll  = Join-Path $repoRoot "src\plugin\x64\Harness\KenshiTogether.dll"
+$json = Join-Path $repoRoot "dist\mods\KenshiTogether\RE_Kenshi.json"
+$mod  = "C:\Program Files (x86)\Steam\steamapps\common\Kenshi\mods\KenshiTogether\KenshiTogether.mod"
 if (-not (Test-Path $dll)) { throw "Build the plugin first (scripts\build_plugin.cmd): $dll" }
-$modDirFwd = "$($cfg.kenshiDir -replace '\\', '/')/mods/KenshiCoop"
-[void](Invoke-LanSsh "mkdir `"$($cfg.kenshiDir)\mods\KenshiCoop`" 2>nul & echo OK")
+$modDirFwd = "$($cfg.kenshiDir -replace '\\', '/')/mods/KenshiTogether"
+[void](Invoke-LanSsh "mkdir `"$($cfg.kenshiDir)\mods\KenshiTogether`" 2>nul & echo OK")
 $push = @($dll, $json)
 if (Test-Path $mod) { $push += $mod }
 & scp -o BatchMode=yes @push "${target}:$modDirFwd/"
 if ($LASTEXITCODE -ne 0) { throw "scp of mod failed (is Kenshi running on $($cfg.host)?)" }
-Write-Host "  mod: pushed -> $($cfg.kenshiDir)\mods\KenshiCoop"
+Write-Host "  mod: pushed -> $($cfg.kenshiDir)\mods\KenshiTogether"
 
 # ---- 4. Fixture saves -------------------------------------------------------------------
 if (-not $SkipSaves) {
@@ -146,6 +146,6 @@ Write-Host "Reminders for $($cfg.host):"
 Write-Host "  * Keep a user logged into the desktop (the task launches interactively)."
 Write-Host "  * Windowed mode must be on (Full Screen=No)."
 Write-Host "  * Same Steam account on both machines: keep ONE client in OFFLINE mode."
-Write-Host "  * Enable the KenshiCoop mod once in Kenshi's Mods tab if this is the first install."
+Write-Host "  * Enable the KenshiTogether mod once in Kenshi's Mods tab if this is the first install."
 Write-Host ""
 Write-Host "Next: powershell -ExecutionPolicy Bypass -File scripts\run_lan_test.ps1 -Scenario coop_presence"

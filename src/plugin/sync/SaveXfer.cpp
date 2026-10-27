@@ -277,7 +277,7 @@ std::string backupRoot() {
     if (!g_testSaveRoot.empty()) return g_testSaveRoot + "_backups";
 #endif
     const char* lad = getenv("LOCALAPPDATA");
-    return pathJoin(lad ? lad : "", "kenshi\\KenshiCoop_backups");
+    return pathJoin(lad ? lad : "", "kenshi\\KenshiTogether_backups");
 }
 
 namespace {

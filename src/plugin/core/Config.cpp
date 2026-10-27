@@ -10,6 +10,22 @@
 #include <windows.h>
 
 namespace coop {
+// Absolute path of a file next to our DLL - wherever the mod lives: Kenshi's
+// mods folder, or a Steam Workshop content folder (fallback: cwd).
+std::string modFilePath(const char* name) {
+    char buf[MAX_PATH];
+    HMODULE h = 0;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCSTR)&modFilePath, &h))
+        h = 0;
+    DWORD n = h ? GetModuleFileNameA(h, buf, MAX_PATH) : 0; // h == 0 would give the exe path
+    if (n == 0 || n >= MAX_PATH) return name;
+    std::string p(buf, n);
+    size_t slash = p.find_last_of("\\/");
+    p = (slash != std::string::npos) ? p.substr(0, slash + 1) : std::string();
+    return p + name;
+}
+
 namespace {
 
 std::string envOr(const char* key, const char* def) {
@@ -70,17 +86,10 @@ std::map<std::string, std::string> parseFlatJson(const std::string& text) {
     return m;
 }
 
-// Absolute path to coop_config.json next to KenshiCoop.dll (fallback: cwd).
-std::string configFilePath() {
-    char buf[MAX_PATH];
-    HMODULE h = GetModuleHandleA("KenshiCoop.dll");
-    DWORD n = GetModuleFileNameA(h, buf, MAX_PATH); // h == 0 would give the exe path
-    if (h == 0 || n == 0 || n >= MAX_PATH) return "coop_config.json";
-    std::string p(buf, n);
-    size_t slash = p.find_last_of("\\/");
-    p = (slash != std::string::npos) ? p.substr(0, slash + 1) : std::string();
-    return p + "coop_config.json";
-}
+
+
+// Absolute path to coop_config.json next to the DLL.
+std::string configFilePath() { return modFilePath("coop_config.json"); }
 
 std::map<std::string, std::string> readConfigFile() {
     std::map<std::string, std::string> m;
@@ -112,7 +121,7 @@ void loadConfig(Config& c) {
     c.save        = envOr("KENSHICOOP_SAVE", "");
     c.testSeconds = std::atoi(envOr("KENSHICOOP_TEST_SECONDS", "0").c_str());
 
-    std::string defLog = c.isHost ? "KenshiCoop_host.log" : "KenshiCoop_join.log";
+    std::string defLog = c.isHost ? "KenshiTogether_host.log" : "KenshiTogether_join.log";
     c.logPath  = envOr("KENSHICOOP_LOG", defLog.c_str());
     c.scenario = envOr("KENSHICOOP_SCENARIO", "");
 

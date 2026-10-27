@@ -1,5 +1,5 @@
 @echo off
-REM Build KenshiCoop.dll with the legacy v100 (VC++ 2010) x64 toolchain on a
+REM Build KenshiTogether.dll with the legacy v100 (VC++ 2010) x64 toolchain on a
 REM machine that has only "Windows SDK 7.1 + VC2010 SP1 compiler update" (no full
 REM VS2010). We hand MSBuild a complete PATH/INCLUDE/LIB and UseEnv=true so it does
 REM not rely on VS2010 registry/SDK auto-detection.
@@ -65,7 +65,7 @@ set "INCLUDE=%VC%\include;%SDK%\Include;%REPO%\third_party\vc10_compat;%KLSDK%\K
 REM Libs: VC10 x64 CRT + Win SDK 7.1 x64 + KenshiLib (kenshilib.lib, OgreMain_x64.lib).
 set "LIB=%VC%\lib\amd64;%SDK%\Lib\x64;%KLSDK%\KenshiLib\Libraries"
 
-echo === Building KenshiCoop.dll (%CONFIG%^|x64, v100) ===
+echo === Building KenshiTogether.dll (%CONFIG%^|x64, v100) ===
 echo KenshiLib SDK: %KLSDK%
 where cl.exe
 

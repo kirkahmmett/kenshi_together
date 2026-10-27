@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-  One-click KenshiCoop installer: finds Kenshi, installs RE_Kenshi (with the
+  One-click Kenshi Together installer: finds Kenshi, installs RE_Kenshi (with the
   1.0.65 executable it needs on a 1.0.68 install), installs + enables the
-  KenshiCoop mod, and can undo all of it.
+  KenshiTogether mod, and can undo all of it.
 
 .DESCRIPTION
   Every step here is one a player otherwise does by hand, and every one of them
@@ -17,26 +17,26 @@
        1.0.68 also build RE_Kenshi\<exe> - the 1.0.65 executable RE_Kenshi
        restarts into - with the bundled courgette patch, and refuse to keep it
        unless its MD5 is the 1.0.65 one. The original executable is never touched.
-    5. Copy the KenshiCoop folder next to this script into <Kenshi>\mods and
+    5. Copy the KenshiTogether folder next to this script into <Kenshi>\mods and
        enable it in data\mods.cfg. An existing coop_config.json is kept.
 
   Config files are backed up once (*.kenshicoop.bak) before the first edit, and
-  a manifest of what was installed is written to mods\KenshiCoop so -Uninstall
+  a manifest of what was installed is written to mods\KenshiTogether so -Uninstall
   removes only what this installer added.
 
 .EXAMPLE
-  KenshiCoop-Setup.cmd                      (double-click: auto-detect, confirm, install)
+  KenshiTogether-Setup.cmd                      (double-click: auto-detect, confirm, install)
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File KenshiCoop-Setup.ps1 -KenshiDir "D:\Games\Kenshi" -Yes
+  powershell -ExecutionPolicy Bypass -File KenshiTogether-Setup.ps1 -KenshiDir "D:\Games\Kenshi" -Yes
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File KenshiCoop-Setup.ps1 -Uninstall -RemoveReKenshi
+  powershell -ExecutionPolicy Bypass -File KenshiTogether-Setup.ps1 -Uninstall -RemoveReKenshi
 #>
 [CmdletBinding()]
 param(
     [string]$KenshiDir = "",
     # Local RE_Kenshi "loose" release zip; skips the download.
     [string]$ReKenshiZip = "",
-    # The KenshiCoop mod folder to install (default: .\KenshiCoop next to this script).
+    # The KenshiTogether mod folder to install (default: .\KenshiTogether next to this script).
     [string]$ModSource = "",
     [switch]$Uninstall,
     # With -Uninstall: also remove RE_Kenshi, but only if this installer put it there.
@@ -246,9 +246,9 @@ function Install-ReKenshi([string]$k, [string]$rek, $ver, $table, $manifest) {
     }
 }
 
-function Install-KenshiCoop([string]$k, [string]$src, $manifest) {
-    Step "KenshiCoop"
-    $dst = Join-Path $k "mods\KenshiCoop"
+function Install-KenshiTogether([string]$k, [string]$src, $manifest) {
+    Step "KenshiTogether"
+    $dst = Join-Path $k "mods\KenshiTogether"
     $keepCfg = Test-Path (Join-Path $dst "coop_config.json")
     if (-not $DryRun) {
         New-Item -ItemType Directory -Force -Path $dst | Out-Null
@@ -258,21 +258,21 @@ function Install-KenshiCoop([string]$k, [string]$src, $manifest) {
         }
         Get-ChildItem -LiteralPath $dst -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
     }
-    Ok ("mod files copied to mods\KenshiCoop" + $(if ($keepCfg) { " (kept your coop_config.json)" } else { "" }))
+    Ok ("mod files copied to mods\KenshiTogether" + $(if ($keepCfg) { " (kept your coop_config.json)" } else { "" }))
 
     $mods = Join-Path $k "data\mods.cfg"
     $raw = if (Test-Path $mods) { [IO.File]::ReadAllText($mods) } else { "" }
-    if ($raw -match '(?m)^KenshiCoop\.mod\s*$') {
-        Ok "KenshiCoop already enabled in data\mods.cfg"
+    if ($raw -match '(?m)^KenshiTogether\.mod\s*$') {
+        Ok "KenshiTogether already enabled in data\mods.cfg"
     } else {
         Backup-Once $mods
         $eol = if ($raw) { Get-Eol $raw } else { "`r`n" }
         $new = $raw
         if ($new -and -not $new.EndsWith("`n")) { $new += $eol }
-        $new += "KenshiCoop.mod" + $eol
+        $new += "KenshiTogether.mod" + $eol
         if (-not $DryRun) { Write-TextKeepEol $mods $new }
         $manifest.modsCfgEdited = $true
-        Ok "enabled KenshiCoop in data\mods.cfg"
+        Ok "enabled KenshiTogether in data\mods.cfg"
     }
 }
 
@@ -288,17 +288,17 @@ function Remove-Line([string]$path, [string]$pattern) {
 }
 
 function Invoke-Uninstall([string]$k) {
-    $dst = Join-Path $k "mods\KenshiCoop"
+    $dst = Join-Path $k "mods\KenshiTogether"
     $manifest = $null
     $mf = Join-Path $dst $MANIFEST_NAME
     if (Test-Path $mf) { $manifest = Get-Content -Raw -LiteralPath $mf | ConvertFrom-Json }
 
-    Step "KenshiCoop"
-    if (Remove-Line (Join-Path $k "data\mods.cfg") 'KenshiCoop\.mod') { Ok "disabled KenshiCoop in data\mods.cfg" }
+    Step "KenshiTogether"
+    if (Remove-Line (Join-Path $k "data\mods.cfg") 'KenshiTogether\.mod') { Ok "disabled KenshiTogether in data\mods.cfg" }
     if (Test-Path $dst) {
         if (-not $DryRun) { Remove-Item -LiteralPath $dst -Recurse -Force }
-        Ok "removed mods\KenshiCoop"
-    } else { Say "mods\KenshiCoop not present" }
+        Ok "removed mods\KenshiTogether"
+    } else { Say "mods\KenshiTogether not present" }
 
     if ($RemoveReKenshi) {
         Step "RE_Kenshi"
@@ -317,7 +317,7 @@ function Invoke-Uninstall([string]$k) {
 # ---- main --------------------------------------------------------------------
 
 Write-Host ""
-Write-Host "Kenshi Together setup (KenshiCoop mod)" -ForegroundColor White
+Write-Host "Kenshi Together setup" -ForegroundColor White
 if ($DryRun) { Warn "dry run - nothing will be changed" }
 
 Step "Kenshi"
@@ -349,7 +349,7 @@ if (-not $DryRun -and -not (Test-Writable $KenshiDir)) {
 
 if ($Uninstall) {
     if (-not $Yes -and -not $DryRun) {
-        $a = Read-Host "  Remove KenshiCoop$(if ($RemoveReKenshi) { ' and RE_Kenshi' }) from this Kenshi install? [y/N]"
+        $a = Read-Host "  Remove Kenshi Together$(if ($RemoveReKenshi) { ' and RE_Kenshi' }) from this Kenshi install? [y/N]"
         if ($a -notmatch '^[yY]') { Say "cancelled"; exit 1 }
     }
     Invoke-Uninstall $KenshiDir
@@ -357,12 +357,12 @@ if ($Uninstall) {
     exit 0
 }
 
-if (-not $ModSource) { $ModSource = Join-Path $here "KenshiCoop" }
-foreach ($f in "KenshiCoop.dll", "KenshiCoop.mod", "RE_Kenshi.json") {
-    if (-not (Test-Path (Join-Path $ModSource $f))) { Fail "the KenshiCoop mod folder is incomplete ($f missing in $ModSource)" }
+if (-not $ModSource) { $ModSource = Join-Path $here "KenshiTogether" }
+foreach ($f in "KenshiTogether.dll", "KenshiTogether.mod", "RE_Kenshi.json") {
+    if (-not (Test-Path (Join-Path $ModSource $f))) { Fail "the KenshiTogether mod folder is incomplete ($f missing in $ModSource)" }
 }
 
-$work = Join-Path $env:TEMP "KenshiCoopSetup"
+$work = Join-Path $env:TEMP "KenshiTogetherSetup"
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 $rek   = Get-ReKenshiPackage $work
 $table = Read-VersionTable $rek
@@ -374,7 +374,7 @@ Ok "game version: $($ver.Name)"
 if ($ver.Name -like "* 1.0.68") { Say "RE_Kenshi runs Kenshi as 1.0.65; the installer builds that executable next to your 1.0.68 one." }
 
 if (-not $Yes -and -not $DryRun) {
-    $a = Read-Host "  Install RE_Kenshi $REK_VERSION and KenshiCoop into this Kenshi? [Y/n]"
+    $a = Read-Host "  Install RE_Kenshi $REK_VERSION and Kenshi Together into this Kenshi? [Y/n]"
     if ($a -match '^[nN]') { Say "cancelled"; exit 1 }
 }
 
@@ -386,8 +386,30 @@ $manifest = [pscustomobject]@{
     pluginsCfgEdited = $false
     modsCfgEdited    = $false
 }
+# Before 2026-10-27 the mod was installed as mods\KenshiCoop. That name is also used by
+# another Workshop mod, so only a folder OUR installer wrote (it holds our manifest)
+# is moved over: its manifest and the player's coop_config.json carry on, the old
+# folder and its mods.cfg line go.
+$legacy = Join-Path $KenshiDir "mods\KenshiCoop"
+$legacyMf = Join-Path $legacy $MANIFEST_NAME
+$newDir = Join-Path $KenshiDir "mods\KenshiTogether"
+if (Test-Path $legacyMf) {
+    Step "older install (KenshiCoop)"
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Force -Path $newDir | Out-Null
+        if (-not (Test-Path (Join-Path $newDir $MANIFEST_NAME))) { Copy-Item -LiteralPath $legacyMf (Join-Path $newDir $MANIFEST_NAME) }
+        $oldCfg = Join-Path $legacy "coop_config.json"
+        if ((Test-Path $oldCfg) -and -not (Test-Path (Join-Path $newDir "coop_config.json"))) { Copy-Item -LiteralPath $oldCfg (Join-Path $newDir "coop_config.json") }
+        Remove-Item -LiteralPath $legacy -Recurse -Force
+    }
+    if (Remove-Line (Join-Path $KenshiDir "data\mods.cfg") 'KenshiCoop\.mod') { Ok "disabled the old KenshiCoop entry in data\mods.cfg" }
+    Ok "moved your older Kenshi Together install (mods\KenshiCoop) to mods\KenshiTogether"
+} elseif (Test-Path $legacy) {
+    Warn "mods\KenshiCoop exists but was not installed by this setup (another co-op mod?) - left alone. Do not enable both."
+}
+
 # Keep what an earlier run recorded, so a re-run never forgets that it owns RE_Kenshi.
-$oldMf = Join-Path $KenshiDir "mods\KenshiCoop\$MANIFEST_NAME"
+$oldMf = Join-Path $KenshiDir "mods\KenshiTogether\$MANIFEST_NAME"
 if (Test-Path $oldMf) {
     $old = Get-Content -Raw -LiteralPath $oldMf | ConvertFrom-Json
     $manifest.reKenshiFiles    = @($old.reKenshiFiles)
@@ -396,10 +418,10 @@ if (Test-Path $oldMf) {
 }
 
 Install-ReKenshi $KenshiDir $rek $ver $table $manifest
-Install-KenshiCoop $KenshiDir $ModSource $manifest
+Install-KenshiTogether $KenshiDir $ModSource $manifest
 $manifest.reKenshiFiles = @($manifest.reKenshiFiles | Select-Object -Unique)
 if (-not $DryRun) {
-    $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $KenshiDir "mods\KenshiCoop\$MANIFEST_NAME") -Encoding UTF8
+    $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $KenshiDir "mods\KenshiTogether\$MANIFEST_NAME") -Encoding UTF8
 }
 
 Write-Host ""

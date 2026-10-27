@@ -787,7 +787,7 @@ function Test-MineOutput {
 # operate pose preceded it) that no r=2 operate apply for that hand appears AFTER the
 # last task-clear. Runs against a MANUAL session log where you added then removed a
 # mining job; invoke as:
-#   . scripts\oracles\Npc.ps1; Test-MineClear -JoinFile <Kenshi-Join>\KenshiCoop_join.log
+#   . scripts\oracles\Npc.ps1; Test-MineClear -JoinFile <Kenshi-Join>\KenshiTogether_join.log
 function Test-MineClear {
     param([string]$JoinFile, [int[]]$WorkTasks = @(87, 221))
     if (-not (Test-Path $JoinFile)) {
@@ -837,7 +837,7 @@ function Test-MineClear {
 # groups cage (kind=2) HEAL ENTERs by occupant and asserts no single occupant re-enters
 # more than MaxEnters times (no sustained oscillation). Log-judged against a MANUAL jail
 # session; invoke as:
-#   . scripts\oracles\Npc.ps1; Test-JailHold -JoinFile <Kenshi-Join>\KenshiCoop_join.log
+#   . scripts\oracles\Npc.ps1; Test-JailHold -JoinFile <Kenshi-Join>\KenshiTogether_join.log
 function Test-JailHold {
     param([string]$JoinFile, [int]$MaxEnters = 3)
     if (-not (Test-Path $JoinFile)) {

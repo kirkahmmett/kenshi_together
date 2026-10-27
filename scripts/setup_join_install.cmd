@@ -71,7 +71,7 @@ echo.
 echo JOIN install ready at: %DST%
 echo Next:
 echo   1) Rebuild/deploy the plugin:  scripts\deploy.cmd
-echo      (deploy.cmd now also pushes KenshiCoop.dll into the join install)
+echo      (deploy.cmd now also pushes KenshiTogether.dll into the join install)
 echo   2) Launch HOST: scripts\launch_host.cmd
 echo   3) Launch JOIN: scripts\launch_join.cmd
 endlocal

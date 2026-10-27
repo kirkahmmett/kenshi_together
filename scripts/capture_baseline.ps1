@@ -71,12 +71,12 @@ if (Test-Path $prototest) {
 # the baseline verdicts actually ran against), plus the shipped Release hash when
 # a Release build is present, so both are diffable later.
 if ($Dll -eq "") {
-    $harnessDll = Join-Path $repoRoot "src\plugin\x64\Harness\KenshiCoop.dll"
-    $releaseDll = Join-Path $repoRoot "src\plugin\x64\Release\KenshiCoop.dll"
+    $harnessDll = Join-Path $repoRoot "src\plugin\x64\Harness\KenshiTogether.dll"
+    $releaseDll = Join-Path $repoRoot "src\plugin\x64\Release\KenshiTogether.dll"
     if (Test-Path $harnessDll) { $Dll = $harnessDll } else { $Dll = $releaseDll }
 }
 $dllHash = Get-Sha256 -Path $Dll
-$releaseDllPath = Join-Path $repoRoot "src\plugin\x64\Release\KenshiCoop.dll"
+$releaseDllPath = Join-Path $repoRoot "src\plugin\x64\Release\KenshiTogether.dll"
 $shippedDllHash = if (Test-Path $releaseDllPath) { Get-Sha256 -Path $releaseDllPath } else { "" }
 
 # ---- manifest + config source hashes ------------------------------------------

@@ -70,7 +70,7 @@ if (-not $gone) {
 }
 
 # Confirm the deployed DLL is actually unlocked before we bother building.
-$deployedDll = "C:\Program Files (x86)\Steam\steamapps\common\Kenshi\mods\KenshiCoop\KenshiCoop.dll"
+$deployedDll = "C:\Program Files (x86)\Steam\steamapps\common\Kenshi\mods\KenshiTogether\KenshiTogether.dll"
 if (Test-Path $deployedDll) {
     $unlocked = $false
     for ($i = 0; $i -lt 10; $i++) {

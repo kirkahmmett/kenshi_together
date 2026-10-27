@@ -6,7 +6,7 @@
   pure units) and the PowerShell harness contract fixtures (manifest schema,
   scenario drift, oracle registry, verdict rule) into a single PASS/FAIL.
 
-  Requires NO Kenshi launch and NO KenshiCoop.dll - only dist\prototest.exe (a
+  Requires NO Kenshi launch and NO KenshiTogether.dll - only dist\prototest.exe (a
   ~30 KB standalone) and the scripts. Run it before the two-client regression
   matrix (scripts\regress.ps1), which needs the game.
 

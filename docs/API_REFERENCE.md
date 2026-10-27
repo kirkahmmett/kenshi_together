@@ -75,7 +75,7 @@
 - **RE_Kenshi** is a Nexus mod (0.3.1+) that, among other features, loads native
   Ogre/Kenshi plugin DLLs. It reads a `RE_Kenshi.json` placed in a normal Kenshi
   mod folder and loads every DLL it lists. The JSON is just:
-  `{ "Plugins" : [ "KenshiCoop.dll" ] }`.
+  `{ "Plugins" : [ "KenshiTogether.dll" ] }`.
 - **KenshiLib** is the library a plugin links against. It provides the
   function-hooking API, runtime address resolution against the loaded
   `Kenshi_x64.exe`, and a large set of **reverse-engineered game class layouts**
@@ -780,7 +780,7 @@ Read once in `startPlugin()`; no recompile needed to change role/behavior.
 - `KENSHICOOP_SAVE` — existing save folder name to auto-load from the title screen (default empty = manual). Auto-loading a non-existent save crashes the game.
 - `KENSHICOOP_AUTOLOAD_DELAY_MS` — settle time before issuing the deferred load (default `5000`).
 - `KENSHICOOP_TEST_SECONDS` — if >0, self-exit (via `TerminateProcess`) this many seconds after gameplay starts (default `0` = never). Used by the test runner.
-- `KENSHICOOP_LOG` — path to the dedicated coop log (default `KenshiCoop_host.log` / `KenshiCoop_join.log`).
+- `KENSHICOOP_LOG` — path to the dedicated coop log (default `KenshiTogether_host.log` / `KenshiTogether_join.log`).
 - `KENSHICOOP_SCENARIO` — name of a compiled scenario to run after load (default empty = normal co-op tick).
 - `KENSHICOOP_AUTOSPAWN` — host-only manual-validation helper: spawn N distinct-hand units into the squad once after gameplay settles.
 - `KENSHICOOP_OWN_INDICES` — squad ownership partition for the inhabit model: `""` = own all (default); `"0"` = own only index 0; `"~0"` = own all except 0; `"1,3"` = own indices 1 and 3.
