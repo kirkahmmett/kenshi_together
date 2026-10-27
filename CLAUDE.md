@@ -1,7 +1,9 @@
 # CLAUDE.md — KenshiCoop (fork)
 
+> 2026-10-27: dağıtılan ad **Kenshi Together** - mod klasörü `mods\KenshiTogether`, `KenshiTogether.dll/.mod`, loglar `KenshiTogether_*.log`. Eski `KenshiCoop` adı Workshop'taki başka bir modla çakışıyordu; repo, proje dosyası, `KENSHICOOP_*` env değişkenleri ve log mesaj metinleri (oracle'lar onları arar) değişmedi.
+
 Kenshi 1.0.65 için co-op multiplayer: RE_Kenshi'nin yüklediği bir KenshiLib plugin'i
-(`KenshiCoop.dll`). Bu fork'un hedefi: **2–8 oyunculu, birkaç saatlik oturumlarda save
+(`KenshiTogether.dll`). Bu fork'un hedefi: **2–8 oyunculu, birkaç saatlik oturumlarda save
 bozulmadan ve akıcı çalışan co-op.** Upstream: `github.com/nhoral/KenshiCoop`.
 
 Yanıtlar Türkçe; teknik terimler İngilizce kalabilir.
@@ -24,7 +26,7 @@ Yanıtlar Türkçe; teknik terimler İngilizce kalabilir.
   README'de geçen `src/nettest/` da artık yok.
 - **Öncelik (kullanıcı kararı, 2026-10-21): önce VANİLLA oyunda co-op.** Ek mod uyumluluğu (mod listesi
   karşılaştırması, Workshop mod testleri) şimdilik kapsam dışı. Bu makinedeki Steam hesabı 46 Workshop
-  mod'una abone, ama `data\mods.cfg`'de yalnızca `KenshiCoop.mod` etkin - testler vanilla oyunda koşar.
+  mod'una abone, ama `data\mods.cfg`'de yalnızca `KenshiTogether.mod` etkin - testler vanilla oyunda koşar.
 
 ### Bu makinedeki oyun kurulumu (2026-10-21)
 
@@ -34,7 +36,7 @@ Yanıtlar Türkçe; teknik terimler İngilizce kalabilir.
   **1.0.65** exe'si (MD5 `df4a5a7e…`, RE_Kenshi `config.json` tablosuyla doğrulandı). Orijinal exe'ye dokunulmadı.
   Oyun penceresi başlığı "Kenshi 1.0.65" ise RE_Kenshi devrede demektir.
 - `Plugins_x64.cfg` ve `data\mods.cfg` yedekleri: `*.pre-rekenshi.bak`, `*.pre-kenshicoop.bak`.
-- Oyuncular için aynı kurulumu `scripts\installer\KenshiCoop-Setup.cmd` yapar (kit kökünde); `-DryRun`,
+- Oyuncular için aynı kurulumu `scripts\installer\KenshiTogether-Setup.cmd` yapar (kit kökünde); `-DryRun`,
   `-Uninstall [-RemoveReKenshi]` destekler.
 
 ## Derleme
@@ -93,7 +95,7 @@ cp $TMP/src/Libraries/ogre/OgreMain_x64.lib $TMP/src/Libraries/mygui/MyGUIEngine
 - `KenshiLib_deps`'teki `Setup.bat` gerekmez (kendini yükseltip `setx` ile kalıcı env yazar); `boost.zip`'i
   Windows `tar.exe` ile aç (Git Bash `tar`'ı zip açamaz).
 
-Çıktı: `src/plugin/x64/<Config>/KenshiCoop.dll`. `deploy.cmd [KenshiDir] [Config]` bu DLL'i
+Çıktı: `src/plugin/x64/<Config>/KenshiTogether.dll`. `deploy.cmd [KenshiDir] [Config]` bu DLL'i
 `<Kenshi>\mods\KenshiCoop\` dizinine, varsa `%USERPROFILE%\Kenshi-Join\mods\KenshiCoop\` dizinine de kopyalar.
 Kenshi açıkken DLL kilitli olur, deploy başarısız olur.
 
@@ -182,9 +184,9 @@ Senaryo manifest'i `scripts/scenarios.psd1`'de (Save, PrimaryGate, Gating/Adviso
 
 ## Loglar
 
-- `<Kenshi>\KenshiCoop_host.log` / `KenshiCoop_join.log`: plugin'in kendi logu (cwd'ye göreli, `KENSHICOOP_LOG` ile değişir).
+- `<Kenshi>\KenshiTogether_host.log` / `KenshiTogether_join.log`: plugin'in kendi logu (cwd'ye göreli, `KENSHICOOP_LOG` ile değişir).
   **Tuzak:** Dosya adı `startPlugin()` sırasında config/env'deki role göre seçilir. Oyuncu rolü F2'den JOIN yapsa bile
-  dosya `KenshiCoop_host.log` adını taşır ve satırlar `[HOST]` etiketiyle başlar. Gerçek rolü `JOIN save suppression`,
+  dosya `KenshiTogether_host.log` adını taşır ve satırlar `[HOST]` etiketiyle başlar. Gerçek rolü `JOIN save suppression`,
   `peer connected id=` gibi satırlardan oku.
 - `<Kenshi>\RE_Kenshi_log.txt`: plugin yüklendi mi (`KenshiCoop loaded!`).
 - `<Kenshi>\kenshi.log` ve `kenshi_info.log`: engine (ör. `alredy has destroy reason` = çift destroy).
