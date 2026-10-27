@@ -16,8 +16,9 @@
     README.txt, KURULUM_TR.txt      <- install + play instructions (not copied into mods)
     PROVENANCE.json                 <- SHA-256 of the shipped DLL
   ...zips it to dist\KenshiTogether-v<version>.zip, and copies the mod folder to
-  dist\workshop\KenshiTogether\ - exactly what a Workshop upload ships (with
-  dist\workshop\preview.png as its picture).
+  dist\workshop\KenshiTogether\ - exactly what a Workshop upload ships, with
+  _KenshiTogether.img (dist\workshop\preview.png) and _KenshiTogether.info
+  (dist\workshop\_KenshiTogether.info) for Kenshi's uploader.
 
   The internal name used to be KenshiCoop; it changed on 2026-10-27 because another
   Workshop mod ships the same KenshiCoop folder and DLL names.
@@ -237,6 +238,13 @@ $wsDir = Join-Path $repoRoot "dist\workshop\$modName"
 if (Test-Path $wsDir) { Remove-Item -Recurse -Force $wsDir }
 New-Item -ItemType Directory -Force -Path $wsDir | Out-Null
 Copy-Item (Join-Path $modDir "*") $wsDir
+# Kenshi's own uploader (the FCS) reads the picture and the item record from the
+# mod folder: _<mod>.img (any PNG/JPG) and _<mod>.info (id 0 = a new item;
+# visibility 0 public / 1 friends / 2 private). After the first upload the FCS
+# writes the item id into the .info - copy it back to dist\workshop so every
+# later upload updates the same item.
+Copy-Item (Join-Path $repoRoot "dist\workshop\preview.png") (Join-Path $wsDir "_$modName.img")
+Copy-Item (Join-Path $repoRoot "dist\workshop\_$modName.info") (Join-Path $wsDir "_$modName.info")
 
 Write-Host ""
 Write-Host "Kit zipped: $zip"
