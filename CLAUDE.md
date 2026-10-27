@@ -10,7 +10,7 @@ Yanıtlar Türkçe; teknik terimler İngilizce kalabilir.
 
 ## Durum (Faz 0 sonu, 2026-10-21)
 
-- Fork: `github.com/kirkahmmett/kenshi-coop` (private). Yerel klon `C:\Users\pc\Desktop\KenshiCoop`,
+- Fork: `github.com/kirkahmmett/kenshi_together` (private). Yerel klon `C:\Users\pc\Desktop\KenshiCoop`,
   remote'lar `origin` = fork, `upstream` = `nhoral/KenshiCoop`. Upstream değişikliklerini
   `git fetch upstream` ile al; topluluk PR'larını `git fetch upstream pull/<n>/head:pr-<n>` ile incele.
 - Kod tabanı upstream `main` @ `5a761e19` (v0.51, `PROTOCOL_VERSION = 55`). Tek fark: KenshiLib
