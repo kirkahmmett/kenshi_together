@@ -13,8 +13,8 @@ UPLOAD CHECKLIST
    enable KenshiTogether in the Mods menu, and check: RE_Kenshi_log.txt shows
    "KenshiTogether:", F2 opens the panel, the version check reads the release
    version (not "dev").
-3. Make the source code public first (AGPL-3.0) and put its link into the
-   description below (SOURCE_LINK_HERE).
+3. Make the source code public first (AGPL-3.0) (its link is already in the
+   description below).
 4. Only then switch the item to Public.
 5. Every update: same version on Workshop and the GitHub zip.
 
@@ -58,7 +58,7 @@ One person hosts their save, friends click "Join" from the main menu, and the ho
 [list]
 [*][b]RE_Kenshi 0.3.1 or newer[/b] - the plugin loader this mod needs. It is not on the Workshop: [url=https://www.nexusmods.com/kenshi/mods/847]RE_Kenshi on Nexus[/url]. Its installer also sets up the Kenshi 1.0.65 executable it runs on.
 [*][b]Steam running and online[/b] for every player.
-[*][b]Prefer a zip?[/b] The GitHub release has a one-click installer (KenshiTogether-Setup.cmd) that also installs RE_Kenshi. Use either the Workshop item or the zip, not both.
+[*][b]Prefer a zip?[/b] The GitHub release (github.com/kirkahmmett/kenshi-coop/releases) has a one-click installer (KenshiTogether-Setup.cmd) that also installs RE_Kenshi. Use either the Workshop item or the zip, not both.
 [*][b]Everyone on the same Kenshi Together version[/b] and the [b]same enabled mods[/b]. The game tells you if something does not match.
 [/list]
 
@@ -100,6 +100,6 @@ Only the host saves - the host's save is the shared save.
 
 [h1]Credits[/h1]
 Built on [url=https://github.com/nhoral/KenshiCoop]KenshiCoop by nhoral[/url] (AGPL-3.0), and on [url=https://github.com/BFrizzleFoShizzle/RE_Kenshi]RE_Kenshi[/url] and KenshiLib.
-Source code: [url=SOURCE_LINK_HERE]GitHub[/url]
+Source code: [url=https://github.com/kirkahmmett/kenshi-coop]github.com/kirkahmmett/kenshi-coop[/url]
 
 Have fun, and please report what breaks - every report makes the next version better.
